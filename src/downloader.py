@@ -1,8 +1,9 @@
 import argparse
 import sys
+from typing import List, Dict, Any
 import yt_dlp
 
-def get_parser():
+def get_parser() -> argparse.ArgumentParser:
     """Create and return the argument parser."""
     parser = argparse.ArgumentParser(
         description="A versatile command-line video downloader for publicly available platforms."
@@ -61,9 +62,9 @@ def get_parser():
 
     return parser
 
-def build_ydl_opts(args):
+def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
     """Build yt-dlp options dictionary based on parsed arguments."""
-    ydl_opts = {
+    ydl_opts: Dict[str, Any] = {
         'outtmpl': args.output,
         'quiet': False,
         'no_warnings': True,
@@ -93,23 +94,24 @@ def build_ydl_opts(args):
         # Determine merge format if specific extension is requested
         if args.format in ['mp4', 'mkv']:
             ydl_opts['merge_output_format'] = args.format
-            # For mp4, try to get compatible streams directly to avoid unnecessary transcoding if possible,
-            # but preserve the resolution constraint we built earlier.
-            if args.format == 'mp4':
-                # Re-apply resolution limits but enforce mp4/m4a compatibility where possible
-                if args.quality == '1080p':
-                    format_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]'
-                elif args.quality == '720p':
-                    format_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]'
-                elif args.quality == '480p':
-                    format_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]'
-                elif args.quality == 'worst':
-                    format_str = 'worst[ext=mp4]/worst'
-                else: # best
-                    format_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
-            else:
-                # For mkv or other formats, append the extension request to the existing format_str
-                format_str += f'[ext={args.format}]'
+
+            # Helper to generate format string with constraints
+            def get_fmt(res_limit: str = "") -> str:
+                if args.format == 'mp4':
+                    return f'bestvideo{res_limit}[ext=mp4]+bestaudio[ext=m4a]/bestvideo{res_limit}+bestaudio/best{res_limit}'
+                else:
+                    return f'bestvideo{res_limit}[ext={args.format}]+bestaudio/best{res_limit}[ext={args.format}]'
+
+            if args.quality == '1080p':
+                format_str = get_fmt("[height<=1080]")
+            elif args.quality == '720p':
+                format_str = get_fmt("[height<=720]")
+            elif args.quality == '480p':
+                format_str = get_fmt("[height<=480]")
+            elif args.quality == 'worst':
+                format_str = f'worst[ext={args.format}]/worst'
+            else: # best
+                format_str = get_fmt("")
 
         ydl_opts['format'] = format_str
 
@@ -131,28 +133,31 @@ def build_ydl_opts(args):
 
     return ydl_opts
 
-def download_video(urls, ydl_opts):
-    """Download videos using yt-dlp."""
+def download_video(urls: List[str], ydl_opts: Dict[str, Any]) -> bool:
+    """Download videos using yt-dlp. Returns True if all downloads succeeded."""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download(urls)
-        return True
+            error_code = ydl.download(urls)
+            return error_code == 0
     except Exception as e:
         print(f"Error downloading video: {e}", file=sys.stderr)
         return False
 
-def main():
+def main() -> None:
     parser = get_parser()
     args = parser.parse_args()
 
-    urls = []
+    urls: List[str] = []
     if args.url:
         urls.append(args.url)
 
     if args.batch_file:
         try:
             with open(args.batch_file, 'r') as f:
-                urls.extend([line.strip() for line in f if line.strip() and not line.startswith('#')])
+                for line in f:
+                    stripped_line = line.strip()
+                    if stripped_line and not stripped_line.startswith('#'):
+                        urls.append(stripped_line)
         except IOError as e:
             print(f"Error reading batch file {args.batch_file}: {e}", file=sys.stderr)
             sys.exit(1)

@@ -10,3 +10,4 @@ venv/
 *.sqlite3
 *.log
 .pytest_cache/
+.coverage
