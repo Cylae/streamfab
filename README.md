@@ -99,3 +99,107 @@ pytest tests/
 ## Disclaimer
 
 This tool is intended solely for downloading unprotected, publicly available content. It does not bypass Digital Rights Management (DRM) or download protected content from commercial streaming platforms. Users are responsible for ensuring they have the legal right to download and use the content they access with this tool.
+
+---
+
+# Versatile Video Downloader (Français)
+
+Un puissant et polyvalent téléchargeur de vidéos en ligne de commande, écrit en Python. Il prend en charge le téléchargement de contenu accessible au public et non protégé par DRM depuis de nombreuses plateformes.
+
+## Fonctionnalités
+
+*   **Téléchargement de vidéos :** Téléchargez depuis n'importe quelle plateforme prise en charge par `yt-dlp`.
+*   **Sélection du format :** Choisissez entre `mp4`, `mkv`, ou laissez l'outil choisir le `best` (meilleur) format.
+*   **Sélection de la qualité :** Spécifiez la qualité vidéo (`best`, `1080p`, `720p`, `480p`, `worst`).
+*   **Extraction audio :** Extrayez uniquement l'audio et enregistrez-le sous forme de fichier MP3.
+*   **Sous-titres :** Téléchargez automatiquement les sous-titres lorsqu'ils sont disponibles.
+*   **Téléchargement par lots :** Lisez plusieurs URL à partir d'un fichier texte pour un téléchargement groupé.
+*   **Contrôle des playlists :** Choisissez de télécharger une playlist entière ou juste une seule vidéo.
+*   **Intégration des métadonnées :** Intégrez les métadonnées de la vidéo (titre, auteur) et les miniatures directement dans le fichier téléchargé.
+*   **Nommage de sortie personnalisé :** Personnalisez le modèle de nom de fichier de sortie.
+
+## Prérequis
+
+*   Python 3.6 ou supérieur
+*   `yt-dlp`
+*   `pytest` (pour l'exécution des tests)
+*   `ffmpeg` (fortement recommandé pour la conversion de format et l'extraction audio)
+
+## Installation
+
+1.  Clonez ce dépôt ou téléchargez les fichiers sources.
+2.  Installez les packages Python requis :
+
+```bash
+pip install -r requirements.txt
+```
+
+3.  Assurez-vous que `ffmpeg` est installé sur votre système.
+    *   **Ubuntu/Debian :** `sudo apt install ffmpeg`
+    *   **macOS :** `brew install ffmpeg`
+    *   **Windows :** Téléchargez-le depuis le site officiel et ajoutez-le à votre variable d'environnement PATH.
+
+## Utilisation
+
+Exécutez le script `downloader.py` depuis le répertoire `src` :
+
+```bash
+python3 src/downloader.py [options] [URL]
+```
+
+### Options
+
+*   `URL` : L'URL de la vidéo à télécharger (Facultatif si `--batch-file` est fourni).
+*   `-a`, `--batch-file` : Fichier contenant les URL à télécharger, une par ligne.
+*   `-f`, `--format` : Spécifiez le format vidéo souhaité (`mp4`, `mkv`, `best`). Par défaut, c'est `best`.
+*   `-q`, `--quality` : Spécifiez la qualité vidéo souhaitée (`best`, `1080p`, `720p`, `480p`, `worst`). Par défaut, c'est `best`.
+*   `--extract-audio` : Extrait uniquement l'audio (sauvegardé en MP3).
+*   `--subtitles` : Télécharge les sous-titres s'ils sont disponibles.
+*   `--no-playlist` : Télécharge uniquement la vidéo, en ignorant le reste de la playlist si l'URL en fait partie.
+*   `--embed-metadata` : Intègre les métadonnées de la vidéo (titre, artiste, etc.) dans le fichier de sortie.
+*   `--embed-thumbnail` : Intègre la miniature de la vidéo en tant que pochette.
+*   `-o`, `--output` : Modèle de nom de fichier de sortie (par exemple, `%(title)s.%(ext)s`).
+
+### Exemples
+
+**Télécharger une vidéo avec les paramètres par défaut (meilleure qualité) :**
+```bash
+python3 src/downloader.py "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Télécharger une vidéo au format MP4 720p :**
+```bash
+python3 src/downloader.py -f mp4 -q 720p "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Extraire uniquement l'audio sous forme de MP3 :**
+```bash
+python3 src/downloader.py --extract-audio "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Télécharger une vidéo avec des sous-titres et l'enregistrer dans un répertoire spécifique :**
+```bash
+python3 src/downloader.py --subtitles -o "~/Downloads/%(title)s.%(ext)s" "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Télécharger une vidéo avec les métadonnées et la miniature intégrées :**
+```bash
+python3 src/downloader.py --embed-metadata --embed-thumbnail "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Télécharger plusieurs vidéos à partir d'un fichier texte (ex. `urls.txt`) :**
+```bash
+python3 src/downloader.py -a urls.txt
+```
+
+## Tests
+
+Pour exécuter les tests automatisés, lancez `pytest` depuis le répertoire racine :
+
+```bash
+pytest tests/
+```
+
+## Avertissement
+
+Cet outil est destiné uniquement au téléchargement de contenu accessible au public et non protégé. Il ne contourne pas la gestion des droits numériques (DRM) et ne télécharge pas de contenu protégé depuis des plateformes de streaming commerciales. Les utilisateurs sont responsables de s'assurer qu'ils ont le droit légal de télécharger et d'utiliser le contenu auquel ils accèdent avec cet outil.
