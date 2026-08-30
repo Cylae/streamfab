@@ -12,6 +12,8 @@ A powerful and versatile command-line video downloader written in Python. It sup
 *   **Batch Downloading:** Read multiple URLs from a text file to download in bulk.
 *   **Playlist Control:** Choose whether to download an entire playlist or just a single video.
 *   **Metadata Embedding:** Embed video metadata (title, author) and thumbnails directly into the downloaded file.
+*   **Smart Retries:** Automatically retries downloads upon transient network failures with exponential backoff.
+*   **List Formats:** Preview all available formats for a video without downloading.
 *   **Custom Output Naming:** Customize the output file name template.
 
 ## Requirements
@@ -54,6 +56,9 @@ python3 src/downloader.py [options] [URL]
 *   `--no-playlist`: Download only the single video, ignoring the rest of the playlist if the URL is part of one.
 *   `--embed-metadata`: Embed video metadata (title, artist, etc.) in the output file.
 *   `--embed-thumbnail`: Embed the video's thumbnail as cover art.
+*   `--list-formats`: List available formats for the URL(s) and exit, without downloading.
+*   `--max-retries`: Number of retry attempts on transient failure (default: 3).
+*   `--retry-backoff`: Base seconds to wait between retries, doubles each attempt (default: 2.0).
 *   `-o`, `--output`: Output filename template (e.g., `%(title)s.%(ext)s`).
 
 ### Examples
@@ -116,6 +121,8 @@ Un puissant et polyvalent téléchargeur de vidéos en ligne de commande, écrit
 *   **Téléchargement par lots :** Lisez plusieurs URL à partir d'un fichier texte pour un téléchargement groupé.
 *   **Contrôle des playlists :** Choisissez de télécharger une playlist entière ou juste une seule vidéo.
 *   **Intégration des métadonnées :** Intégrez les métadonnées de la vidéo (titre, auteur) et les miniatures directement dans le fichier téléchargé.
+*   **Nouvelles tentatives intelligentes :** Relance automatiquement les téléchargements en cas d'erreurs réseau passagères, avec un délai d'attente exponentiel.
+*   **Liste des formats :** Prévisualisez tous les formats disponibles pour une vidéo sans la télécharger.
 *   **Nommage de sortie personnalisé :** Personnalisez le modèle de nom de fichier de sortie.
 
 ## Prérequis
@@ -158,6 +165,9 @@ python3 src/downloader.py [options] [URL]
 *   `--no-playlist` : Télécharge uniquement la vidéo, en ignorant le reste de la playlist si l'URL en fait partie.
 *   `--embed-metadata` : Intègre les métadonnées de la vidéo (titre, artiste, etc.) dans le fichier de sortie.
 *   `--embed-thumbnail` : Intègre la miniature de la vidéo en tant que pochette.
+*   `--list-formats` : Liste les formats disponibles pour la/les URL(s) et quitte, sans télécharger.
+*   `--max-retries` : Nombre de tentatives de relance en cas d'erreur réseau passagère (par défaut : 3).
+*   `--retry-backoff` : Temps d'attente de base en secondes entre les tentatives, double à chaque essai (par défaut : 2.0).
 *   `-o`, `--output` : Modèle de nom de fichier de sortie (par exemple, `%(title)s.%(ext)s`).
 
 ### Exemples
