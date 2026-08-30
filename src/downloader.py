@@ -2,6 +2,19 @@ import argparse
 import sys
 from typing import List, Dict, Any
 import yt_dlp
+from rich.console import Console
+
+console = Console()
+
+class RichLogger:
+    def debug(self, msg: str) -> None:
+        pass
+
+    def warning(self, msg: str) -> None:
+        console.print(f"[yellow]Warning:[/yellow] {msg}")
+
+    def error(self, msg: str) -> None:
+        console.print(f"[red]Error:[/red] {msg}")
 
 def get_parser() -> argparse.ArgumentParser:
     """Create and return the argument parser."""
@@ -66,9 +79,11 @@ def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
     """Build yt-dlp options dictionary based on parsed arguments."""
     ydl_opts: Dict[str, Any] = {
         'outtmpl': args.output,
-        'quiet': False,
+        'quiet': True,
         'no_warnings': True,
         'noplaylist': args.no_playlist,
+        'logger': RichLogger(),
+        'progress_hooks': [progress_hook],
     }
 
     # Format and quality selection
@@ -133,6 +148,20 @@ def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
 
     return ydl_opts
 
+def progress_hook(d: dict) -> None:
+    if d['status'] == 'downloading':
+        percent = d.get('_percent_str', 'N/A')
+        speed = d.get('_speed_str', 'N/A')
+        eta = d.get('_eta_str', 'N/A')
+        filename = d.get('filename', 'video')
+        # Only print a clean line that overrides the previous one
+        # Using ANSI escape codes instead of rich tags since we use sys.stdout directly for \r magic
+        sys.stdout.write(f"\r\033[K\033[36mDownloading...\033[0m {percent} at {speed} ETA {eta}")
+        sys.stdout.flush()
+    elif d['status'] == 'finished':
+        print() # New line after the progress bar finishes
+        console.print("[green]Download finished, processing...[/green]")
+
 def download_video(urls: List[str], ydl_opts: Dict[str, Any]) -> bool:
     """Download videos using yt-dlp. Returns True if all downloads succeeded."""
     try:
@@ -140,7 +169,7 @@ def download_video(urls: List[str], ydl_opts: Dict[str, Any]) -> bool:
             error_code = ydl.download(urls)
             return error_code == 0
     except Exception as e:
-        print(f"Error downloading video: {e}", file=sys.stderr)
+        console.print(f"[bold red]Critical error during download:[/bold red] {e}")
         return False
 
 def main() -> None:
@@ -159,21 +188,21 @@ def main() -> None:
                     if stripped_line and not stripped_line.startswith('#'):
                         urls.append(stripped_line)
         except IOError as e:
-            print(f"Error reading batch file {args.batch_file}: {e}", file=sys.stderr)
+            console.print(f"[bold red]Error reading batch file {args.batch_file}:[/bold red] {e}")
             sys.exit(1)
 
     if not urls:
         parser.error("You must provide a URL or a batch file containing URLs.")
 
-    print(f"Preparing to download {len(urls)} item(s)...")
+    console.print(f"[bold blue]Preparing to download {len(urls)} item(s)...[/bold blue]")
     ydl_opts = build_ydl_opts(args)
 
     success = download_video(urls, ydl_opts)
     if success:
-        print("Download(s) completed successfully.")
+        console.print("[bold green]✔ All download(s) completed successfully.[/bold green]")
         sys.exit(0)
     else:
-        print("Download(s) failed.")
+        console.print("[bold red]✖ Some download(s) failed.[/bold red]")
         sys.exit(1)
 
 if __name__ == "__main__":

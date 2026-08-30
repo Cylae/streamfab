@@ -56,10 +56,12 @@ def test_build_ydl_opts_defaults():
     opts = build_ydl_opts(args)
 
     assert opts['outtmpl'] == '%(title)s.%(ext)s'
-    assert opts['quiet'] is False
+    assert opts['quiet'] is True
     assert opts['no_warnings'] is True
     assert opts['format'] == 'bestvideo+bestaudio/best'
     assert 'writesubtitles' not in opts
+    assert 'logger' in opts
+    assert 'progress_hooks' in opts
 
 def test_build_ydl_opts_audio():
     parser = get_parser()
@@ -108,7 +110,52 @@ def test_build_ydl_opts_no_playlist():
     assert opts['noplaylist'] is True
 
 
+@patch('sys.stdout.write')
+@patch('sys.stdout.flush')
+def test_progress_hook_downloading(mock_flush, mock_write):
+    from downloader import progress_hook
+    d = {'status': 'downloading', '_percent_str': '50%', '_speed_str': '1MiB/s', '_eta_str': '00:01'}
+    progress_hook(d)
+    mock_write.assert_called_once()
+    mock_flush.assert_called_once()
+
+@patch('downloader.console.print')
+def test_progress_hook_finished(mock_print):
+    from downloader import progress_hook
+    d = {'status': 'finished'}
+    progress_hook(d)
+    mock_print.assert_called_once_with("[green]Download finished, processing...[/green]")
+
+def test_rich_logger():
+    from downloader import RichLogger
+    logger = RichLogger()
+    # Check that it has the required methods (can't easily assert on output without mocking console in the same file context, but testing existence is enough)
+    assert hasattr(logger, 'debug')
+    assert hasattr(logger, 'warning')
+    assert hasattr(logger, 'error')
+    logger.debug("test") # Should do nothing
+    with patch('downloader.console.print') as mock_print:
+        logger.warning("test warn")
+        mock_print.assert_called_once_with("[yellow]Warning:[/yellow] test warn")
+    with patch('downloader.console.print') as mock_print:
+        logger.error("test err")
+        mock_print.assert_called_once_with("[red]Error:[/red] test err")
+
+
 # --- New Extended Tests ---
+
+@pytest.mark.parametrize("quality,expected_fmt", [
+    ("best", "bestvideo+bestaudio/best"),
+    ("1080p", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("720p", "bestvideo[height<=720]+bestaudio/best[height<=720]"),
+    ("480p", "bestvideo[height<=480]+bestaudio/best[height<=480]"),
+    ("worst", "worst"),
+])
+def test_build_ydl_opts_best_format_all_qualities(quality, expected_fmt):
+    parser = get_parser()
+    args = parser.parse_args(['http://example.com', '-q', quality])
+    opts = build_ydl_opts(args)
+    assert opts['format'] == expected_fmt
 
 @pytest.mark.parametrize("quality,expected_fmt", [
     ("best", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"),
@@ -195,11 +242,28 @@ def test_main_batch_file_ioerror(mock_file):
         main()
     assert excinfo.value.code == 1
 
+@patch('sys.argv', ['downloader.py', '--invalid-argument'])
+def test_main_invalid_args():
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 2
+
 @patch('sys.argv', ['downloader.py'])
 def test_main_no_urls():
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert excinfo.value.code == 2 # argparse error code
+
+@patch('sys.argv', ['downloader.py', 'http://single.com', '-a', 'batch.txt'])
+@patch('builtins.open', new_callable=mock_open, read_data="http://batch1.com\nhttp://batch2.com\n")
+@patch('downloader.download_video')
+def test_main_url_and_batch_file(mock_download, mock_file):
+    mock_download.return_value = True
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 0
+    mock_download.assert_called_once()
+    assert mock_download.call_args[0][0] == ['http://single.com', 'http://batch1.com', 'http://batch2.com']
 
 @patch('sys.argv', ['downloader.py', '-a', 'batch.txt'])
 @patch('builtins.open', new_callable=mock_open, read_data="\n#only comments\n")
