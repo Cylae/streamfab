@@ -7,7 +7,15 @@ def get_parser():
     parser = argparse.ArgumentParser(
         description="A versatile command-line video downloader for publicly available platforms."
     )
-    parser.add_argument("url", help="The URL of the video to download.")
+    parser.add_argument(
+        "url",
+        nargs="?",
+        help="The URL of the video to download. Optional if --batch-file is used."
+    )
+    parser.add_argument(
+        "-a", "--batch-file",
+        help="File containing URLs to download, one per line."
+    )
     parser.add_argument(
         "-f", "--format",
         choices=["mp4", "mkv", "best"],
@@ -31,6 +39,21 @@ def get_parser():
         help="Download subtitles if available."
     )
     parser.add_argument(
+        "--no-playlist",
+        action="store_true",
+        help="Download only the video, if the URL refers to a video and a playlist."
+    )
+    parser.add_argument(
+        "--embed-metadata",
+        action="store_true",
+        help="Embed video metadata (title, artist, etc.) in the output file."
+    )
+    parser.add_argument(
+        "--embed-thumbnail",
+        action="store_true",
+        help="Embed video thumbnail as cover art."
+    )
+    parser.add_argument(
         "-o", "--output",
         default="%(title)s.%(ext)s",
         help="Output filename template."
@@ -44,6 +67,7 @@ def build_ydl_opts(args):
         'outtmpl': args.output,
         'quiet': False,
         'no_warnings': True,
+        'noplaylist': args.no_playlist,
     }
 
     # Format and quality selection
@@ -94,13 +118,24 @@ def build_ydl_opts(args):
         ydl_opts['writesubtitles'] = True
         ydl_opts['subtitleslangs'] = ['en', 'all'] # try english, fallback to all
 
+    # Metadata and Post-processing
+    postprocessors = ydl_opts.get('postprocessors', [])
+    if args.embed_metadata:
+        postprocessors.append({'key': 'FFmpegMetadata'})
+    if args.embed_thumbnail:
+        ydl_opts['writethumbnail'] = True
+        postprocessors.append({'key': 'EmbedThumbnail'})
+
+    if postprocessors:
+        ydl_opts['postprocessors'] = postprocessors
+
     return ydl_opts
 
-def download_video(url, ydl_opts):
-    """Download video using yt-dlp."""
+def download_video(urls, ydl_opts):
+    """Download videos using yt-dlp."""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            ydl.download(urls)
         return True
     except Exception as e:
         print(f"Error downloading video: {e}", file=sys.stderr)
@@ -110,15 +145,30 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
 
-    print(f"Preparing to download: {args.url}")
+    urls = []
+    if args.url:
+        urls.append(args.url)
+
+    if args.batch_file:
+        try:
+            with open(args.batch_file, 'r') as f:
+                urls.extend([line.strip() for line in f if line.strip() and not line.startswith('#')])
+        except IOError as e:
+            print(f"Error reading batch file {args.batch_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    if not urls:
+        parser.error("You must provide a URL or a batch file containing URLs.")
+
+    print(f"Preparing to download {len(urls)} item(s)...")
     ydl_opts = build_ydl_opts(args)
 
-    success = download_video(args.url, ydl_opts)
+    success = download_video(urls, ydl_opts)
     if success:
-        print("Download completed successfully.")
+        print("Download(s) completed successfully.")
         sys.exit(0)
     else:
-        print("Download failed.")
+        print("Download(s) failed.")
         sys.exit(1)
 
 if __name__ == "__main__":

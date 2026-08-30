@@ -25,6 +25,9 @@ def test_parser_custom_args():
         '-q', '720p',
         '--extract-audio',
         '--subtitles',
+        '--no-playlist',
+        '--embed-metadata',
+        '--embed-thumbnail',
         '-o', 'custom.%(ext)s'
     ])
 
@@ -33,7 +36,16 @@ def test_parser_custom_args():
     assert args.quality == '720p'
     assert args.extract_audio is True
     assert args.subtitles is True
+    assert args.no_playlist is True
+    assert args.embed_metadata is True
+    assert args.embed_thumbnail is True
     assert args.output == 'custom.%(ext)s'
+
+def test_parser_batch_file():
+    parser = get_parser()
+    args = parser.parse_args(['-a', 'urls.txt'])
+    assert args.batch_file == 'urls.txt'
+    assert args.url is None
 
 def test_build_ydl_opts_defaults():
     parser = get_parser()
@@ -75,3 +87,22 @@ def test_build_ydl_opts_subtitles():
 
     assert opts['writesubtitles'] is True
     assert 'en' in opts['subtitleslangs']
+
+def test_build_ydl_opts_metadata_thumbnail():
+    parser = get_parser()
+    args = parser.parse_args(['http://example.com/video', '--embed-metadata', '--embed-thumbnail'])
+
+    opts = build_ydl_opts(args)
+
+    assert opts['writethumbnail'] is True
+    keys = [p['key'] for p in opts['postprocessors']]
+    assert 'FFmpegMetadata' in keys
+    assert 'EmbedThumbnail' in keys
+
+def test_build_ydl_opts_no_playlist():
+    parser = get_parser()
+    args = parser.parse_args(['http://example.com/video', '--no-playlist'])
+
+    opts = build_ydl_opts(args)
+
+    assert opts['noplaylist'] is True
