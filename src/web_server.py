@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import anyio
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -101,15 +102,21 @@ async def require_cookie_admin(request: Request):
 
 
 async def require_media_user(request: Request):
-    # A shared cookie jar must never lend the owner's session to anonymous users.
-    if get_cookiefile_opt():
+    # Capture credential permission before queueing. Installing a jar later must
+    # never upgrade an anonymous extraction or download to an account session.
+    try:
         await require_cookie_admin(request)
+    except HTTPException:
+        if get_cookiefile_opt():
+            raise
+        return False
+    return True
 
 
 app = FastAPI(
     lifespan=lifespan,
     title="StreamFab Web API",
-    description="Ultra-fast media conversion and download engine surpassing NoTube.",
+    description="Single-user media extraction, conversion and download API.",
     version="2.0.0",
 )
 
@@ -213,12 +220,14 @@ async def health_check() -> dict[str, Any]:
     }
 
 
-@app.post("/api/info", dependencies=[Depends(require_media_user)])
-async def get_info(req: InfoRequest) -> dict[str, Any]:
+@app.post("/api/info")
+async def get_info(
+    req: InfoRequest, use_cookies: bool = Depends(require_media_user)
+) -> dict[str, Any]:
     """Extract metadata, available resolutions, and options for a given URL."""
     try:
         # Offload yt-dlp metadata extraction to threadpool to keep async loop fast
-        data = await extract_bounded(extract_media_info, req.url)
+        data = await extract_bounded(extract_media_info, req.url, True, use_cookies)
         return {"success": True, "data": data}
     except HTTPException:
         raise
@@ -233,8 +242,10 @@ class StreamUrlsRequest(DownloadRequest):
     pass
 
 
-@app.post("/api/stream-urls", dependencies=[Depends(require_media_user)])
-async def get_stream_urls(req: StreamUrlsRequest) -> dict[str, Any]:
+@app.post("/api/stream-urls")
+async def get_stream_urls(
+    req: StreamUrlsRequest, use_cookies: bool = Depends(require_media_user)
+) -> dict[str, Any]:
     """Resolve direct/proxied stream URLs for zero-server-CPU client-side processing."""
     try:
         data = await extract_bounded(
@@ -244,6 +255,7 @@ async def get_stream_urls(req: StreamUrlsRequest) -> dict[str, Any]:
             req.video_quality,
             req.video_format,
             req.audio_format,
+            use_cookies,
         )
         result = dict(data)
         if data.get("audio_stream_url"):
@@ -293,33 +305,51 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
     if _proxy_active >= 16:
         raise HTTPException(status_code=503, detail="Stream capacity reached. Try again later.")
     _proxy_active += 1
-    client = public_async_client()
+    client = None
     upstream_resp = None
+    closed = False
+
+    async def close_stream():
+        nonlocal closed
+        global _proxy_active
+        if not closed:
+            closed = True
+            _proxy_active -= 1
+            # Streaming disconnects use AnyIO cancellation scopes. Cleanup must
+            # finish even when the surrounding request has been cancelled.
+            with anyio.CancelScope(shield=True):
+                try:
+                    if upstream_resp is not None:
+                        await upstream_resp.aclose()
+                finally:
+                    if client is not None:
+                        await client.aclose()
+
     try:
+        client = public_async_client()
         for _ in range(5):
             upstream_req = client.build_request("GET", current_url, headers=req_headers)
             resp = await client.send(upstream_req, stream=True)
+            upstream_resp = resp
             if resp.is_redirect and "location" in resp.headers:
                 raw_loc = resp.headers["location"]
                 await resp.aclose()
+                upstream_resp = None
                 next_url = urllib.parse.urljoin(current_url, raw_loc)
                 current_url = await asyncio.to_thread(validate_and_sanitize_url, next_url)
                 continue
-            upstream_resp = resp
             break
 
         if upstream_resp is None:
             raise HTTPException(status_code=502, detail="Too many redirects from upstream stream.")
     except HTTPException:
-        _proxy_active -= 1
-        await client.aclose()
+        await close_stream()
         raise
-    except Exception:
-        _proxy_active -= 1
-        if upstream_resp:
-            await upstream_resp.aclose()
-        await client.aclose()
-        raise HTTPException(status_code=502, detail="Upstream stream request failed.")
+    except BaseException as exc:
+        await close_stream()
+        if not isinstance(exc, Exception):
+            raise
+        raise HTTPException(status_code=502, detail="Upstream stream request failed.") from exc
 
     content_type = (
         upstream_resp.headers.get("content-type", "application/octet-stream")
@@ -332,10 +362,14 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
         or content_type
         in ("image/jpeg", "image/png", "image/webp", "application/octet-stream", "application/mp4")
     ):
-        _proxy_active -= 1
-        await upstream_resp.aclose()
-        await client.aclose()
+        await close_stream()
         raise HTTPException(status_code=502, detail="Upstream response is not supported media.")
+    length = upstream_resp.headers.get("content-length")
+    if length is not None and (
+        not re.fullmatch(r"[0-9]{1,20}", length) or int(length) > 2 * 1024**3
+    ):
+        await close_stream()
+        raise HTTPException(status_code=502, detail="Upstream media exceeds the stream size limit.")
     resp_headers = {
         "Accept-Ranges": "bytes",
         "Cache-Control": "private, no-store",
@@ -344,24 +378,13 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
         if h in upstream_resp.headers:
             resp_headers[h] = upstream_resp.headers[h]
 
-    closed = False
-
-    async def close_stream():
-        nonlocal closed
-        global _proxy_active
-        if not closed:
-            closed = True
-            _proxy_active -= 1
-            await upstream_resp.aclose()
-            await client.aclose()
-
     async def stream_generator():
         total = 0
         try:
             async for chunk in upstream_resp.aiter_raw(chunk_size=65536):
                 total += len(chunk)
                 if total > 2 * 1024**3:
-                    break
+                    raise RuntimeError("Upstream stream exceeded the size limit.")
                 yield chunk
         finally:
             await close_stream()
@@ -375,11 +398,14 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
     )
 
 
-@app.post("/api/download", dependencies=[Depends(require_media_user)])
-async def start_download(req: DownloadRequest) -> dict[str, Any]:
+@app.post("/api/download")
+async def start_download(
+    req: DownloadRequest, use_cookies: bool = Depends(require_media_user)
+) -> dict[str, Any]:
     """Initiate a download task with high performance settings."""
     options = DownloadOptions(
         url=req.url,
+        use_cookies=use_cookies,
         media_type=req.media_type,
         audio_format=req.audio_format,
         audio_quality=req.audio_quality,
@@ -424,8 +450,12 @@ async def stream_progress(task_id: str) -> StreamingResponse:
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
 
-    async def event_generator() -> AsyncGenerator[str, None]:
+    try:
         queue = task.add_subscriber()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    async def event_generator() -> AsyncGenerator[str, None]:
         try:
             while True:
                 try:
@@ -442,6 +472,7 @@ async def stream_progress(task_id: str) -> StreamingResponse:
 
     return StreamingResponse(
         event_generator(),
+        background=BackgroundTask(task.remove_subscriber, queue),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

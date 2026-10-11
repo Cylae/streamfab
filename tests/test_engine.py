@@ -63,8 +63,8 @@ def test_metadata_cache():
     assert cached["title"] == "Cached Video"
 
     # Test expiration
-    _METADATA_CACHE[url] = (time.time() - 400, {"title": "Expired Video"})
-    assert get_cached_metadata(url) is None
+    with patch("engine.time.monotonic", return_value=time.monotonic() + 400):
+        assert get_cached_metadata(url) is None
 
 
 @patch("engine.PublicYoutubeDL")
@@ -409,12 +409,13 @@ def test_classify_engine_error_extended():
 
 def test_metadata_cache_pruning():
     _METADATA_CACHE.clear()
-    now = time.time()
-    for i in range(105):
-        _METADATA_CACHE[f"https://example.com/old_{i}"] = (now - 400, {"title": f"Old {i}"})
-    assert len(_METADATA_CACHE) == 105
+    for i in range(100):
+        set_cached_metadata(f"https://example.com/old_{i}", {"title": f"Old {i}"})
+    assert len(_METADATA_CACHE) == 100
     # Adding one more triggers pruning of expired entries
-    set_cached_metadata("https://example.com/new_item", {"title": "New Item"})
+    with patch("engine.time.monotonic", return_value=time.monotonic() + 400):
+        set_cached_metadata("https://example.com/new_item", {"title": "New Item"})
+        assert get_cached_metadata("https://example.com/new_item") == {"title": "New Item"}
     assert len(_METADATA_CACHE) == 1
 
 

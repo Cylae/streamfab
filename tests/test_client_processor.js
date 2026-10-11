@@ -222,6 +222,8 @@ async function runFallbackTests() {
 runAudioTest()
   .then(() => runFallbackTests())
   .then(() => runAuditRegressions())
+  .then(() => runOverlappingCancellationTest())
+  .then(() => runBoundedStreamTests())
   .then(() => {
     console.log('=====================================================');
     console.log('🎉 ALL CLIENT-SIDE PROCESSOR TESTS PASSED (100%)');
@@ -253,5 +255,57 @@ async function runAuditRegressions() {
   assert.strictEqual(mp4.filename, 'Exact MP4.mp4');
   assert.strictEqual(mp4.blob.type, 'video/mp4');
   console.log('Audit processor regressions passed: timestamps, Unicode, metadata, trim ranges and video fidelity.');
+}
+
+async function runOverlappingCancellationTest() {
+  // Real public process entrypoint: keep a decode in flight, cancel, start a new
+  // request, then release the old decoder. Its cancellation must remain terminal.
+  let finishOldDecode;
+  const originalDecode = engine.audioContext.decodeAudioData;
+  const oldFetch = sandbox.fetch;
+  let decodes = 0;
+  engine.audioContext.decodeAudioData = () => {
+    if (++decodes === 1) return new Promise(resolve => { finishOldDecode = resolve; });
+    return Promise.resolve(mockAudioBuffer);
+  };
+  sandbox.fetch = async (url) => url === '/api/stream-urls'
+    ? { ok: true, json: async () => ({ success: true, data: { title: 'Independent call', audio_proxy_url: '/audio' } }) }
+    : new Response(new Uint8Array([1, 2, 3]));
+  const options = { url: 'https://public.example', audio_format: 'mp3', embed_metadata: false, embed_thumbnail: false };
+  const oldOperation = engine.process(options);
+  const oldResult = oldOperation.then(() => 'completed', error => error.name);
+  while (!finishOldDecode) await new Promise(resolve => setTimeout(resolve, 0));
+  engine.cancel();
+  const newOperation = engine.process(options);
+  finishOldDecode(mockAudioBuffer);
+  assert.strictEqual(await oldResult, 'AbortError');
+  assert.strictEqual((await newOperation).filename, 'Independent call.mp3');
+  engine.audioContext.decodeAudioData = originalDecode;
+  sandbox.fetch = oldFetch;
+  console.log('Overlapping browser operations keep independent cancellation state.');
+}
+
+async function runBoundedStreamTests() {
+  const originalFetch = sandbox.fetch;
+  const buffer = Object.getPrototypeOf(engine).fetchStreamWithProgress;
+  let cancelled = false;
+  sandbox.fetch = async () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array([1])); },
+    cancel() { cancelled = true; }
+  }), { headers: { 'Content-Length': '5' } });
+  await assert.rejects(buffer.call(engine, '/cover', 'Cover', null, 0, 0, 4), /memory limit/);
+  assert(cancelled, 'Declared oversized response must cancel the upstream body.');
+  cancelled = false;
+  sandbox.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1, 2, 3]));
+      controller.enqueue(new Uint8Array([4, 5, 6]));
+    },
+    cancel() { cancelled = true; }
+  }));
+  await assert.rejects(buffer.call(engine, '/cover', 'Cover', null, 0, 0, 4), /memory limit/);
+  assert(cancelled, 'Undeclared oversized response must cancel the reader.');
+  sandbox.fetch = originalFetch;
+  console.log('Browser stream and cover budgets cancel oversized declared and streamed bodies.');
 }
 

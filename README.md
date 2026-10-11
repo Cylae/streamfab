@@ -57,6 +57,8 @@ Session cookies grant access to an account. Upload them only to an instance you 
 
 Cookie administration is restricted to loopback clients unless `STREAMFAB_ADMIN_TOKEN` is configured. When configured, use `Authorization: Bearer <token>` even locally. The Cookie Assistant has a token input; the token stays in memory. If a cookie file is installed, remote media analysis/download/proxy requests also require that authorization, so anonymous callers cannot borrow the owner's session. File/progress/cancel URLs use an unguessable task UUID as a capability; keep these URLs private.
 
+`STREAMFAB_COOKIES_FILE` selects the only credential file; an absent configured file never activates another jar. Without it, the sole default is project-root `cookies.txt`. Historical automatic searches in the working directory and `src` were removed; explicitly configure a legacy jar's path to keep using it. Cookie permission is captured at request admission, so installing cookies later cannot grant account access to an anonymous queued task. Account and anonymous metadata caches are separate; jar changes invalidate outstanding cache writes.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -70,7 +72,7 @@ Cookie administration is restricted to loopback clients unless `STREAMFAB_ADMIN_
 | `STREAMFAB_TRUSTED_HOSTS` | `localhost,127.0.0.1,[::1]` | Comma-separated accepted HTTP hostnames |
 | `STREAMFAB_LOG_LEVEL` | `info` | Uvicorn logging level |
 
-Limits: 3 concurrent downloads, 4 metadata extractions, 16 proxy streams, 100 retained tasks, 100 metadata cache entries, and 3 MiB request bodies. Download progress enforces a 2 GiB task disk budget and checks free disk space. These checks are not filesystem quotas; conversion and temporary files can exceed the budget between checks. Use container and filesystem resource limits for remote deployments. Completed/error/cancelled tasks expire after one hour; active workers are retained. Outputs survive process restart only when an atomic completion record exists. Periodic cleanup runs every minute while the server is running.
+Limits: 3 concurrent downloads, 4 metadata extractions, 16 proxy streams, 32 SSE subscribers per task, 100 retained tasks, 100 metadata cache entries, and 3 MiB request bodies. Browser cover-art buffering is capped at 8 MiB. Download progress enforces a 2 GiB task disk budget and checks free disk space, including after trimming. These checks are not filesystem quotas; conversion and temporary files can exceed the budget between checks. Use container and filesystem resource limits for remote deployments. Completed/error/cancelled tasks expire after one hour; active workers are retained. Outputs survive process restart only when an atomic completion record exists. Periodic cleanup runs every minute while the server is running. POSIX output directories use owner-only permissions; configure equivalent Windows ACLs for shared computers.
 
 Run **one Uvicorn worker**. Task state and rate limits are in memory and are not shared between processes.
 
@@ -94,8 +96,8 @@ Cancellation interrupts progress hooks and local trimming. A blocking extractor 
 
 ```bash
 python -m pip install -r requirements-dev.txt
-python -m ruff check src tests
-python -m ruff format --check src tests
+python -m ruff check src tests scripts
+python -m ruff format --check src tests scripts
 python -m pytest --cov=src --cov-report=term-missing
 npm ci
 npm test
@@ -104,6 +106,8 @@ npm audit
 ```
 
 Tests isolate storage, cookies, DNS and background downloads. They include guarded transport integration with a synthetic HTTP server, real FFmpeg audio/video fixtures where FFmpeg is available, and DOM regressions for unsafe metadata and cancellation. Tests do not claim every live platform works. See [AUDIT.md](AUDIT.md) for findings, validation evidence and limitations; see [DEPLOYMENT.md](DEPLOYMENT.md) for installation on a server.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for requirements, trust boundaries, design decisions, debugging and regression guidance. With a full git checkout, `python scripts/benchmark_body_limit.py` reproduces the fragmented-request body benchmark against the first audit's merged commit. This synthetic measurement does not predict download throughput or browser memory usage.
 
 Dependencies are pinned. The public-network transport adapter uses internal yt-dlp/httpcore APIs: rerun transport tests before updating them. To refresh the complete runtime lock in a clean virtual environment, install reviewed direct requirements, run `python -m pip freeze > requirements.lock`, audit the result, and rerun the suite. Do not schedule unattended dependency upgrades.
 

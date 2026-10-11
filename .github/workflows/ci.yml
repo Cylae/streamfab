@@ -26,8 +26,8 @@ jobs:
             requirements.lock
             requirements-dev.txt
       - run: python -m pip install -r requirements.lock -r requirements-dev.txt
-      - run: python -m ruff check src tests
-      - run: python -m ruff format --check src tests
+      - run: python -m ruff check src tests scripts
+      - run: python -m ruff format --check src tests scripts
       - run: python -m pytest --cov=src --cov-report=term-missing
   javascript:
     runs-on: ubuntu-latest

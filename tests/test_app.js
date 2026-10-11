@@ -78,7 +78,24 @@ async function main() {
   app.state.blobUrl = 'blob:previous';
   app.resetAll();
   assert(revoked.includes('blob:previous'));
+
+  // A delayed cancellation response belongs only to the previous operation.
+  let finishCancellation;
+  w.fetch = (url) => new Promise(resolve => { finishCancellation = resolve; });
+  app.state.activeTaskId = 'previous-task';
+  const cancelling = app.cancelCurrentTask();
+  app.renderMediaInfo(info);
+  app.state.activeTaskId = 'new-task';
+  app.state.isProcessing = true;
+  const newSource = { closed: false, close() { this.closed = true; } };
+  app.state.eventSource = newSource;
+  finishCancellation({ ok: true });
+  await cancelling;
+  assert.equal(app.state.activeTaskId, 'new-task');
+  assert.equal(app.state.isProcessing, true);
+  assert.equal(newSource.closed, false);
+  assert.equal(app.state.currentMedia.title, info.title);
   dom.window.close();
-  console.log('App DOM regressions passed: event bindings, XSS, theme, cookies, playlist routing, cancellation and blob cleanup.');
+  console.log('App DOM regressions passed: event bindings, XSS, theme, cookies, playlist routing, overlapping cancellation and blob cleanup.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
