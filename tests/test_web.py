@@ -374,4 +374,56 @@ def test_file_path_traversal_blocked():
     assert response.status_code in (403, 404)
 
 
+def test_cookies_status_endpoint():
+    response = client.get("/api/cookies")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "has_cookies" in data["data"]
+    assert "count" in data["data"]
+
+
+def test_cookies_upload_and_delete():
+    sample_cookie = (
+        "# Netscape HTTP Cookie File\n"
+        ".youtube.com\tTRUE\t/\tTRUE\t1735689600\tLOGIN_INFO\taf9328402\n"
+        ".youtube.com\tTRUE\t/\tTRUE\t1735689600\tSID\tsample_session\n"
+    )
+    # Upload cookies
+    res = client.post("/api/cookies", json={"content": sample_cookie})
+    assert res.status_code == 200
+    res_data = res.json()
+    assert res_data["success"] is True
+    assert res_data["data"]["has_cookies"] is True
+    assert res_data["data"]["has_youtube_cookies"] is True
+    assert res_data["data"]["youtube_count"] == 2
+
+    # Verify status
+    res_status = client.get("/api/cookies")
+    assert res_status.status_code == 200
+    assert res_status.json()["data"]["has_cookies"] is True
+
+    # Delete cookies
+    res_del = client.delete("/api/cookies")
+    assert res_del.status_code == 200
+    assert res_del.json()["success"] is True
+
+    # Status should now be has_cookies: False
+    res_status_after = client.get("/api/cookies")
+    assert res_status_after.json()["data"]["has_cookies"] is False
+
+
+def test_cookies_upload_empty():
+    res = client.post("/api/cookies", json={"content": "   "})
+    assert res.status_code == 400
+    assert "empty" in res.json()["detail"].lower()
+
+
+def test_cookies_upload_oversized():
+    oversized = "a" * (2 * 1024 * 1024 + 10)
+    res = client.post("/api/cookies", json={"content": oversized})
+    assert res.status_code == 400
+    assert "limit" in res.json()["detail"].lower()
+
+
 

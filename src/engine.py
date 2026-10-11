@@ -67,19 +67,82 @@ def parse_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
         return None
 
 
+COOKIES_FILE_PATH = (Path(__file__).resolve().parent.parent / "cookies.txt").resolve()
+
+
 def get_cookiefile_opt() -> Optional[str]:
     """Return path to cookie file if configured or present in project root."""
     custom_cookie = os.getenv("STREAMFAB_COOKIES_FILE")
     if custom_cookie and Path(custom_cookie).is_file():
         return str(Path(custom_cookie).resolve())
     for candidate in [
+        COOKIES_FILE_PATH,
         Path.cwd() / "cookies.txt",
-        Path(__file__).resolve().parent.parent / "cookies.txt",
         Path(__file__).resolve().parent / "cookies.txt",
     ]:
         if candidate.is_file():
             return str(candidate.resolve())
     return None
+
+
+def get_cookies_status() -> Dict[str, Any]:
+    """Return status of installed YouTube cookies."""
+    cookie_path = get_cookiefile_opt()
+    if not cookie_path or not os.path.isfile(cookie_path):
+        return {
+            "has_cookies": False,
+            "filename": None,
+            "count": 0,
+            "has_youtube_cookies": False,
+            "youtube_count": 0,
+            "updated_at": None,
+        }
+    try:
+        with open(cookie_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        yt_count = sum(1 for line in lines if "youtube.com" in line.lower() or "google.com" in line.lower())
+        mtime = datetime.fromtimestamp(os.path.getmtime(cookie_path), timezone.utc).isoformat()
+        return {
+            "has_cookies": True,
+            "filename": Path(cookie_path).name,
+            "count": len(lines),
+            "has_youtube_cookies": yt_count > 0,
+            "youtube_count": yt_count,
+            "updated_at": mtime,
+        }
+    except Exception:
+        return {
+            "has_cookies": False,
+            "filename": None,
+            "count": 0,
+            "has_youtube_cookies": False,
+            "youtube_count": 0,
+            "updated_at": None,
+        }
+
+
+def save_cookies_text(content: str) -> Dict[str, Any]:
+    """Validate and safely save cookies in Netscape format."""
+    clean = content.strip()
+    if not clean:
+        raise ValueError("Cookie content cannot be empty.")
+    if len(clean) > 2 * 1024 * 1024:
+        raise ValueError("Cookie file size exceeds maximum limit of 2MB.")
+
+    COOKIES_FILE_PATH.write_text(clean, encoding="utf-8")
+    return get_cookies_status()
+
+
+def delete_cookies_file() -> bool:
+    """Delete the saved cookies.txt file if it exists."""
+    cookie_path = get_cookiefile_opt()
+    if cookie_path and os.path.isfile(cookie_path):
+        try:
+            os.remove(cookie_path)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def classify_engine_error(exc: Exception) -> str:
@@ -89,8 +152,8 @@ def classify_engine_error(exc: Exception) -> str:
         return "Security check blocked request: unauthorized destination."
     if "confirm you’re not a bot" in msg or "confirm you're not a bot" in msg or ("bot" in msg and ("sign in" in msg or "cookies" in msg)):
         return (
-            "YouTube anti-bot verification triggered ('Sign in to confirm you’re not a bot'). "
-            "YouTube requires session verification for this connection. Place a cookies.txt file in the project folder to authenticate."
+            "YOUTUBE_BOT_CHECK: YouTube requires human verification for this network ('Sign in to confirm you’re not a bot'). "
+            "Please use the 1-Click Cookie Assistant below to unlock this video."
         )
     if "drm" in msg or "protected content" in msg:
         return "This media is protected by DRM and cannot be downloaded."

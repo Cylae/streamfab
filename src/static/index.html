@@ -51,6 +51,11 @@
         <a href="#features" class="nav-link">Features</a>
         <a href="#comparison" class="nav-link">vs NoTube</a>
         <a href="#faq" class="nav-link">FAQ</a>
+        <button type="button" id="cookieNavBtn" class="btn-cookie-nav" aria-label="YouTube Cookie Session Assistant" title="YouTube Cookie Session Assistant" onclick="window.app.openCookieModal()">
+          <span class="cookie-nav-icon" aria-hidden="true">🍪</span>
+          <span id="cookieNavLabel" class="cookie-nav-label">Cookies</span>
+          <span id="cookieNavDot" class="cookie-nav-dot" title="Cookie status"></span>
+        </button>
         <button id="themeToggleBtn" class="btn-icon theme-toggle" aria-label="Toggle light/dark theme" title="Toggle theme">
           <span class="sun-icon" aria-hidden="true">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -131,6 +136,70 @@
         </div>
         <div id="errorMessage" class="alert-content">An error occurred.</div>
         <button type="button" class="alert-close" onclick="window.app.hideError()">&times;</button>
+      </div>
+
+      <!-- YouTube Anti-Bot Challenge Guidance Card -->
+      <div id="botChallengeGuidance" class="bot-guidance-card glass-card hidden" role="region" aria-label="YouTube Verification Assistant">
+        <div class="guidance-header">
+          <div class="guidance-title-wrapper">
+            <div class="guidance-icon-badge" aria-hidden="true">🛡️</div>
+            <div class="guidance-title-block">
+              <span class="guidance-badge">Verification Challenge Detected</span>
+              <h3 class="guidance-title">YouTube is asking to confirm you're human</h3>
+            </div>
+          </div>
+          <button type="button" class="guidance-close" onclick="window.app.hideBotGuidance()" aria-label="Close guidance">&times;</button>
+        </div>
+
+        <p class="guidance-desc">
+          YouTube temporarily triggered an anti-bot verification challenge (<code>Sign in to confirm you're not a bot</code>) on this network.
+          <strong>Don't worry &mdash; you can unlock this video in 30 seconds</strong> using your browser's session cookies. No passwords or account credentials are exchanged!
+        </p>
+
+        <div class="guidance-steps-grid">
+          <div class="guidance-step-card">
+            <div class="step-num-pill">Step 1</div>
+            <div class="step-card-title">Get Free Extension</div>
+            <p class="step-card-desc">Install the trusted open-source cookie exporter in your browser:</p>
+            <div class="step-btn-group">
+              <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener noreferrer" class="btn-step-link" title="Open Chrome Web Store">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                <span>Chrome / Brave / Edge</span>
+              </a>
+              <a href="https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/" target="_blank" rel="noopener noreferrer" class="btn-step-link" title="Open Firefox Add-ons">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                <span>Firefox Add-on</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="guidance-step-card">
+            <div class="step-num-pill">Step 2</div>
+            <div class="step-card-title">Export YouTube Cookies</div>
+            <p class="step-card-desc">
+              Open <strong>youtube.com</strong> in your browser, click the extension icon in your toolbar, and click <strong>Export</strong> (downloads a <code>cookies.txt</code> file).
+            </p>
+          </div>
+
+          <div class="guidance-step-card">
+            <div class="step-num-pill">Step 3</div>
+            <div class="step-card-title">Drop It Here to Unlock</div>
+            <p class="step-card-desc">
+              Click the button below to upload or paste your <code>cookies.txt</code>. StreamFab will automatically re-analyze your video immediately!
+            </p>
+          </div>
+        </div>
+
+        <div class="guidance-actions">
+          <button type="button" class="btn-primary btn-guidance-primary" onclick="window.app.openCookieModal()">
+            <span class="btn-icon-symbol">🍪</span>
+            <span>Unlock With Cookie Assistant</span>
+          </button>
+          <button type="button" class="btn-secondary btn-guidance-retry" onclick="window.app.handleAnalyze()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span>Retry Analysis</span>
+          </button>
+        </div>
       </div>
     </section>
 
@@ -531,6 +600,85 @@
     </section>
 
   </main>
+
+  <!-- Cookie Assistant Modal -->
+  <div id="cookieModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cookieModalTitle">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge" aria-hidden="true">🍪</div>
+          <div>
+            <h2 id="cookieModalTitle" class="modal-title">Cookie Assistant</h2>
+            <div class="modal-subtitle">Authenticate YouTube requests safely &amp; bypass bot checks</div>
+          </div>
+        </div>
+        <button type="button" class="modal-close" onclick="window.app.closeCookieModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <!-- Current Status Banner -->
+      <div id="cookieStatusBanner" class="cookie-status-banner">
+        <div class="status-indicator">
+          <span id="cookieModalDot" class="status-dot"></span>
+          <span id="cookieModalStatusText">Checking cookie status...</span>
+        </div>
+        <button type="button" id="cookieDeleteBtn" class="btn-delete-cookie hidden" onclick="window.app.deleteCookies()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>Remove Cookies</span>
+        </button>
+      </div>
+
+      <!-- Tab Switcher -->
+      <div class="cookie-modal-tabs">
+        <button type="button" id="tabUploadFile" class="cookie-tab-btn active" onclick="window.app.switchCookieTab('upload')">
+          📁 Upload File (cookies.txt)
+        </button>
+        <button type="button" id="tabPasteText" class="cookie-tab-btn" onclick="window.app.switchCookieTab('paste')">
+          📋 Paste Text
+        </button>
+      </div>
+
+      <!-- Tab 1: Upload Dropzone -->
+      <div id="cookieUploadPane" class="cookie-pane">
+        <div id="cookieDropzone" class="cookie-dropzone">
+          <input type="file" id="cookieFileInput" class="file-input-hidden" accept=".txt,text/plain">
+          <div class="dropzone-icon" aria-hidden="true">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <div class="dropzone-title">Drag &amp; drop your <strong>cookies.txt</strong> file here</div>
+          <div class="dropzone-hint">or click Browse to choose from your disk</div>
+          <button type="button" class="btn-secondary btn-dropzone-browse" onclick="document.getElementById('cookieFileInput').click()">
+            Browse File
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Paste Pane -->
+      <div id="cookiePastePane" class="cookie-pane hidden">
+        <label for="cookieTextarea" class="paste-label">Paste exported Netscape cookie content below:</label>
+        <textarea id="cookieTextarea" class="cookie-textarea" rows="7" placeholder="# Netscape HTTP Cookie File&#10;# http://curl.haxx.se/rfc/cookie_spec.html&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1735689600&#9;VISITOR_INFO1_LIVE&#9;..."></textarea>
+        <div class="paste-actions">
+          <button type="button" id="savePastedCookiesBtn" class="btn-primary" onclick="window.app.savePastedCookies()">
+            Save &amp; Activate Cookies
+          </button>
+        </div>
+      </div>
+
+      <!-- Feedback / Result alert -->
+      <div id="cookieModalAlert" class="cookie-modal-alert hidden" role="alert"></div>
+
+      <!-- Quick Help & Privacy Box -->
+      <div class="modal-info-footer">
+        <div class="info-row">
+          <span class="info-icon" aria-hidden="true">🔒</span>
+          <span><strong>100% Private &amp; Local:</strong> Your cookies remain exclusively on your local StreamFab instance to authenticate yt-dlp. No credentials are transmitted to any cloud servers.</span>
+        </div>
+        <div class="info-row">
+          <span class="info-icon" aria-hidden="true">💡</span>
+          <span><strong>How it works:</strong> Export cookies from YouTube using the <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener noreferrer">Get cookies.txt LOCALLY</a> browser extension, drop the file here, and StreamFab handles the rest automatically.</span>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Footer -->
   <footer class="app-footer">

@@ -3,8 +3,8 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![yt--dlp](https://img.shields.io/badge/yt--dlp-2024%2B-red.svg)](https://github.com/yt-dlp/yt-dlp)
-[![Tests](https://img.shields.io/badge/Tests-121%20passed-brightgreen.svg)]()
-[![Coverage](https://img.shields.io/badge/Coverage-92%25-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-125%20passed-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/Coverage-93%25-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)]()
 
 > A high-performance, ad-free, privacy-friendly video & audio converter and downloader. Designed to completely outclass legacy web converters like **NoTube** with client-side in-browser computing (0% server CPU load), turbo multi-fragment downloads, lossless audio (FLAC/MP3 320k), 4K 60fps video, interactive trimming, playlist batching, and real-time SSE progress tracking. Available both as a modern Web App and a versatile CLI.
@@ -123,6 +123,7 @@ python src/downloader.py -a urls.txt
 | `--embed-thumbnail` | Embed high-resolution cover art | False |
 | `--list-formats` | List all available stream formats without downloading | False |
 | `--max-retries` | Number of retries on transient network errors | 3 |
+| `--cookies` | Path to Netscape `cookies.txt` file for authentication & bot challenge bypass | Auto (`cookies.txt`) |
 | `--web` | Launch the modern StreamFab Web App | False |
 | `--port` | Port for the web server | 8000 |
 | `--host` | Host address for the web server | 127.0.0.1 |
@@ -141,6 +142,9 @@ StreamFab includes an asynchronous FastAPI backend:
 | `/api/info` | `POST` | Instant media analysis (title, uploader, thumbnail, formats, subtitles, playlist items) |
 | `/api/stream-urls` | `POST` | Resolves direct CDN stream URLs for zero-server-CPU client-side processing |
 | `/api/proxy-stream` | `GET` | Zero-CPU asynchronous stream pass-through with Range support for browser clients |
+| `/api/cookies` | `GET` | Get status of installed YouTube cookies (`has_cookies`, count, timestamps) |
+| `/api/cookies` | `POST` | Upload or paste Netscape format `cookies.txt` with auto-validation |
+| `/api/cookies` | `DELETE` | Remove installed cookies file |
 | `/api/download` | `POST` | Dispatches background conversion task with turbo multi-fragment engine |
 | `/api/progress/{task_id}` | `GET` | Server-Sent Events (SSE) streaming real-time progress (% %, speed, ETA, status) |
 | `/api/file/{task_id}` | `GET` | Downloads the converted file with resume support and safe path validation |
@@ -200,9 +204,30 @@ Detailed deployment instructions for **Docker**, **Ubuntu/Debian Systemd**, **Ng
 
 ---
 
+## 🍪 1-Click Cookie Assistant (Bypassing YouTube Anti-Bot Challenges)
+
+YouTube periodically triggers automated verification challenges (`Sign in to confirm you’re not a bot`) on server networks, cloud providers, and high-frequency queries.
+
+StreamFab provides an interactive **Cookie Assistant** built directly into the Web UI:
+
+1. **Automatic Detection**: When a YouTube challenge occurs, StreamFab replaces confusing error screens with an informative, step-by-step guidance card taking you by the hand.
+2. **1-Click Extension Export**:
+   - Install the trusted, open-source browser extension [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) (Chrome / Brave / Edge) or [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/) (Firefox).
+   - Open YouTube in your browser, click the extension icon, and click **Export**.
+3. **Drop or Paste & Auto-Retry**:
+   - Drag & drop the downloaded `cookies.txt` into StreamFab (or paste the text).
+   - StreamFab validates the file, saves it securely on your local instance, and **automatically re-triggers video analysis** with zero extra clicks.
+4. **CLI Support**:
+   - You can also pass cookies directly from the terminal:
+     ```bash
+     python src/downloader.py --cookies path/to/cookies.txt "https://www.youtube.com/watch?v=..."
+     ```
+
+---
+
 ## 🧪 Testing
 
-Execute the comprehensive Python test suite (121 tests, 92% statement coverage) with `pytest`:
+Execute the comprehensive Python test suite (125 tests, 93% statement coverage) with `pytest`:
 
 ```bash
 pytest

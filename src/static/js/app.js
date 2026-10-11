@@ -29,6 +29,7 @@
       this.cacheDom();
       this.bindEvents();
       this.initTheme();
+      this.refreshCookieStatus();
     }
 
     cacheDom() {
@@ -91,6 +92,24 @@
       this.dom.finalDownloadLink = document.getElementById('finalDownloadLink');
       this.dom.downloadBtnText = document.getElementById('downloadBtnText');
       this.dom.cancelActionRow = document.getElementById('cancelActionRow');
+
+      // Cookie Assistant & Anti-Bot Challenge DOM elements
+      this.dom.cookieNavBtn = document.getElementById('cookieNavBtn');
+      this.dom.cookieNavDot = document.getElementById('cookieNavDot');
+      this.dom.cookieNavLabel = document.getElementById('cookieNavLabel');
+      this.dom.botChallengeGuidance = document.getElementById('botChallengeGuidance');
+      this.dom.cookieModal = document.getElementById('cookieModal');
+      this.dom.cookieModalDot = document.getElementById('cookieModalDot');
+      this.dom.cookieModalStatusText = document.getElementById('cookieModalStatusText');
+      this.dom.cookieDeleteBtn = document.getElementById('cookieDeleteBtn');
+      this.dom.tabUploadFile = document.getElementById('tabUploadFile');
+      this.dom.tabPasteText = document.getElementById('tabPasteText');
+      this.dom.cookieUploadPane = document.getElementById('cookieUploadPane');
+      this.dom.cookiePastePane = document.getElementById('cookiePastePane');
+      this.dom.cookieDropzone = document.getElementById('cookieDropzone');
+      this.dom.cookieFileInput = document.getElementById('cookieFileInput');
+      this.dom.cookieTextarea = document.getElementById('cookieTextarea');
+      this.dom.cookieModalAlert = document.getElementById('cookieModalAlert');
     }
 
     bindEvents() {
@@ -166,6 +185,67 @@
           this.dom.previewVideoPlayer.pause();
         }
       });
+
+      // Cookie Dropzone Drag and Drop
+      if (this.dom.cookieDropzone) {
+        ['dragenter', 'dragover'].forEach((evtName) => {
+          this.dom.cookieDropzone.addEventListener(evtName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.dom.cookieDropzone.classList.add('dragover');
+          });
+        });
+
+        ['dragleave', 'dragend', 'drop'].forEach((evtName) => {
+          this.dom.cookieDropzone.addEventListener(evtName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.dom.cookieDropzone.classList.remove('dragover');
+          });
+        });
+
+        this.dom.cookieDropzone.addEventListener('drop', (e) => {
+          const files = e.dataTransfer?.files;
+          if (files && files.length > 0) {
+            const file = files[0];
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              this.uploadCookieContent(evt.target.result);
+            };
+            reader.readAsText(file);
+          }
+        });
+      }
+
+      // Cookie File Input change
+      if (this.dom.cookieFileInput) {
+        this.dom.cookieFileInput.addEventListener('change', (e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              this.uploadCookieContent(evt.target.result);
+            };
+            reader.readAsText(file);
+          }
+        });
+      }
+
+      // Close modal on background click
+      if (this.dom.cookieModal) {
+        this.dom.cookieModal.addEventListener('click', (e) => {
+          if (e.target === this.dom.cookieModal) {
+            this.closeCookieModal();
+          }
+        });
+      }
+
+      // Keyboard Esc to close modal
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.dom.cookieModal && !this.dom.cookieModal.classList.contains('hidden')) {
+          this.closeCookieModal();
+        }
+      });
     }
 
     /* ---------------- Theme Management ---------------- */
@@ -197,6 +277,7 @@
       if (!url) return;
 
       this.hideError();
+      this.hideBotGuidance();
       this.setAnalyzeLoading(true);
 
       try {
@@ -211,9 +292,21 @@
           throw new Error(data.detail || 'Unable to extract media information.');
         }
 
+        this.hideBotGuidance();
         this.renderMediaInfo(data.data);
       } catch (err) {
-        this.showError(err.message || 'An unexpected error occurred.');
+        const msg = String(err.message || '');
+        const isBotCheck =
+          msg.includes('YOUTUBE_BOT_CHECK') ||
+          msg.toLowerCase().includes('not a bot') ||
+          msg.toLowerCase().includes('verification challenge') ||
+          (msg.toLowerCase().includes('bot') && (msg.toLowerCase().includes('sign in') || msg.toLowerCase().includes('cookies')));
+
+        if (isBotCheck) {
+          this.showBotGuidance();
+        } else {
+          this.showError(msg || 'An unexpected error occurred.');
+        }
       } finally {
         this.setAnalyzeLoading(false);
       }
@@ -238,6 +331,20 @@
 
     hideError() {
       this.dom.errorAlert.classList.add('hidden');
+    }
+
+    showBotGuidance() {
+      this.hideError();
+      if (this.dom.botChallengeGuidance) {
+        this.dom.botChallengeGuidance.classList.remove('hidden');
+        this.dom.botChallengeGuidance.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    hideBotGuidance() {
+      if (this.dom.botChallengeGuidance) {
+        this.dom.botChallengeGuidance.classList.add('hidden');
+      }
     }
 
     renderMediaInfo(info) {
@@ -629,6 +736,159 @@
         this.state.eventSource.close();
       }
       this.resetAll();
+    }
+
+    /* ---------------- Cookie Session Assistant Logic ---------------- */
+    async refreshCookieStatus() {
+      try {
+        const res = await fetch('/api/cookies');
+        const json = await res.json();
+        if (!res.ok || !json.success) return;
+
+        const data = json.data || {};
+        if (data.has_cookies) {
+          if (this.dom.cookieNavDot) {
+            this.dom.cookieNavDot.classList.add('active');
+            this.dom.cookieNavDot.title = `Active cookies loaded (${data.count} items, ${data.youtube_count} YouTube)`;
+          }
+          if (this.dom.cookieNavLabel) {
+            this.dom.cookieNavLabel.textContent = 'Cookies Active';
+          }
+          if (this.dom.cookieModalDot) {
+            this.dom.cookieModalDot.classList.add('active');
+          }
+          if (this.dom.cookieModalStatusText) {
+            this.dom.cookieModalStatusText.textContent = `Active Session (${data.count} cookies, ${data.youtube_count} YouTube)`;
+          }
+          if (this.dom.cookieDeleteBtn) {
+            this.dom.cookieDeleteBtn.classList.remove('hidden');
+          }
+        } else {
+          if (this.dom.cookieNavDot) {
+            this.dom.cookieNavDot.classList.remove('active');
+            this.dom.cookieNavDot.title = 'No active cookies';
+          }
+          if (this.dom.cookieNavLabel) {
+            this.dom.cookieNavLabel.textContent = 'Cookies';
+          }
+          if (this.dom.cookieModalDot) {
+            this.dom.cookieModalDot.classList.remove('active');
+          }
+          if (this.dom.cookieModalStatusText) {
+            this.dom.cookieModalStatusText.textContent = 'No active cookies loaded';
+          }
+          if (this.dom.cookieDeleteBtn) {
+            this.dom.cookieDeleteBtn.classList.add('hidden');
+          }
+        }
+      } catch (e) {
+        // Silently tolerate network/offline quirks
+      }
+    }
+
+    openCookieModal() {
+      if (this.dom.cookieModal) {
+        this.dom.cookieModal.classList.remove('hidden');
+        this.refreshCookieStatus();
+        this.hideCookieModalAlert();
+      }
+    }
+
+    closeCookieModal() {
+      if (this.dom.cookieModal) {
+        this.dom.cookieModal.classList.add('hidden');
+      }
+    }
+
+    switchCookieTab(tab) {
+      if (tab === 'upload') {
+        if (this.dom.tabUploadFile) this.dom.tabUploadFile.classList.add('active');
+        if (this.dom.tabPasteText) this.dom.tabPasteText.classList.remove('active');
+        if (this.dom.cookieUploadPane) this.dom.cookieUploadPane.classList.remove('hidden');
+        if (this.dom.cookiePastePane) this.dom.cookiePastePane.classList.add('hidden');
+      } else {
+        if (this.dom.tabPasteText) this.dom.tabPasteText.classList.add('active');
+        if (this.dom.tabUploadFile) this.dom.tabUploadFile.classList.remove('active');
+        if (this.dom.cookiePastePane) this.dom.cookiePastePane.classList.remove('hidden');
+        if (this.dom.cookieUploadPane) this.dom.cookieUploadPane.classList.add('hidden');
+      }
+      this.hideCookieModalAlert();
+    }
+
+    showCookieModalAlert(type, message) {
+      if (!this.dom.cookieModalAlert) return;
+      this.dom.cookieModalAlert.className = `cookie-modal-alert ${type}`;
+      this.dom.cookieModalAlert.textContent = message;
+      this.dom.cookieModalAlert.classList.remove('hidden');
+    }
+
+    hideCookieModalAlert() {
+      if (this.dom.cookieModalAlert) {
+        this.dom.cookieModalAlert.classList.add('hidden');
+        this.dom.cookieModalAlert.textContent = '';
+      }
+    }
+
+    async uploadCookieContent(content) {
+      const clean = (content || '').trim();
+      if (!clean) {
+        this.showCookieModalAlert('error', 'Cookie content is empty.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/cookies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: clean }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.detail || 'Failed to save cookies.');
+        }
+
+        const ytCount = json.data?.youtube_count || 0;
+        this.showCookieModalAlert(
+          'success',
+          `Cookies loaded successfully (${json.data?.count || 0} entries, ${ytCount} YouTube)! Re-analyzing video...`
+        );
+        await this.refreshCookieStatus();
+        this.hideBotGuidance();
+
+        // Auto-close modal and automatically re-analyze the video with zero extra clicks!
+        setTimeout(() => {
+          this.closeCookieModal();
+          if (this.dom.urlInput && this.dom.urlInput.value.trim()) {
+            this.handleAnalyze();
+          }
+        }, 850);
+      } catch (err) {
+        this.showCookieModalAlert('error', err.message || 'Error uploading cookies.');
+      }
+    }
+
+    async savePastedCookies() {
+      const content = this.dom.cookieTextarea ? this.dom.cookieTextarea.value.trim() : '';
+      if (!content) {
+        this.showCookieModalAlert('error', 'Please paste your Netscape cookie text first.');
+        return;
+      }
+      await this.uploadCookieContent(content);
+    }
+
+    async deleteCookies() {
+      if (!confirm('Are you sure you want to remove active cookies?')) return;
+      try {
+        const res = await fetch('/api/cookies', { method: 'DELETE' });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.detail || 'Failed to remove cookies.');
+        }
+        this.showCookieModalAlert('success', 'Active cookies have been removed.');
+        await this.refreshCookieStatus();
+      } catch (err) {
+        this.showCookieModalAlert('error', err.message || 'Error deleting cookies.');
+      }
     }
 
     resetAll() {

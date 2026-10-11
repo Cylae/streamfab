@@ -25,10 +25,13 @@ from engine import (
     DownloadOptions,
     DownloadTask,
     DOWNLOADS_DIR,
+    delete_cookies_file,
     engine,
     extract_media_info,
+    get_cookies_status,
     parse_timestamp,
     resolve_stream_urls,
+    save_cookies_text,
 )
 from security import (
     SecurityHeadersMiddleware,
@@ -358,6 +361,34 @@ async def cancel_download(task_id: str) -> Dict[str, Any]:
 
     task.cancel()
     return {"success": True, "message": "Download cancelled."}
+
+
+class CookiePayload(BaseModel):
+    content: str
+
+
+@app.get("/api/cookies")
+async def get_cookies() -> Dict[str, Any]:
+    """Get status of installed cookies.txt file."""
+    status_data = get_cookies_status()
+    return {"success": True, "data": status_data}
+
+
+@app.post("/api/cookies")
+async def upload_cookies(payload: CookiePayload) -> Dict[str, Any]:
+    """Upload or paste Netscape format cookies.txt to bypass YouTube bot challenges."""
+    try:
+        updated = save_cookies_text(payload.content)
+        return {"success": True, "data": updated, "message": "Cookies saved successfully."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/cookies")
+async def remove_cookies() -> Dict[str, Any]:
+    """Remove installed cookies.txt."""
+    deleted = delete_cookies_file()
+    return {"success": True, "deleted": deleted}
 
 
 # Serve SPA frontend
