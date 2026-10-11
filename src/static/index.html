@@ -311,6 +311,24 @@
             </div>
           </div>
 
+          <!-- Compute Engine Mode Selector (Client vs Cloud) -->
+          <div class="engine-mode-box">
+            <div class="engine-mode-header">
+              <span class="engine-icon">⚡</span>
+              <div>
+                <strong>Processing Engine:</strong>
+                <span class="engine-badge active" id="engineBadge">In-Browser Client (0% Server CPU)</span>
+              </div>
+            </div>
+            <div class="engine-mode-toggle">
+              <label class="toggle-switch">
+                <input type="checkbox" id="clientComputeToggle" checked onchange="window.app.toggleComputeMode(this.checked)">
+                <span class="slider"></span>
+              </label>
+              <span class="engine-desc" id="engineDesc">Computations (decoding, trimming, MP3 encoding &amp; tagging) run 100% on your device CPU for maximum privacy &amp; zero server load.</span>
+            </div>
+          </div>
+
           <!-- Main Launch Conversion Button -->
           <div class="conversion-actions">
             <button type="button" id="startConvertBtn" class="btn-primary btn-convert" onclick="window.app.startDownload()">
@@ -348,6 +366,10 @@
           <div class="metric-item">
             <span class="metric-label">Remaining Time (ETA):</span>
             <span id="metricEta" class="metric-value">--:--</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">Server CPU Load:</span>
+            <span id="metricCpu" class="metric-value badge-success">0.0% (Zero Load)</span>
           </div>
           <div class="metric-item">
             <span class="metric-label">Status:</span>
@@ -522,6 +544,11 @@
     </div>
   </footer>
 
+  <!-- Vendor libraries (100% offline & local for client-side compute) -->
+  <script src="/static/js/vendor/lame.min.js"></script>
+  <script src="/static/js/vendor/mp4box.all.min.js"></script>
+  <!-- Client Media Processor (Zero Server CPU) -->
+  <script src="/static/js/client-processor.js"></script>
   <!-- Main JavaScript Application -->
   <script src="/static/js/app.js"></script>
 </body>

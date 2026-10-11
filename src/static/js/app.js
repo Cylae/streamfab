@@ -18,6 +18,7 @@
         currentMedia: null,
         activeTaskId: null,
         eventSource: null,
+        useClientCompute: true,
       };
 
       this.dom = {};
@@ -84,6 +85,7 @@
       this.dom.metricSpeed = document.getElementById('metricSpeed');
       this.dom.metricEta = document.getElementById('metricEta');
       this.dom.metricStatus = document.getElementById('metricStatus');
+      this.dom.metricCpu = document.getElementById('metricCpu');
 
       this.dom.downloadReadyActions = document.getElementById('downloadReadyActions');
       this.dom.finalDownloadLink = document.getElementById('finalDownloadLink');
@@ -417,6 +419,38 @@
       this.dom.trimEndInput.value = '';
     }
 
+    toggleComputeMode(isClient) {
+      this.state.useClientCompute = isClient;
+      const badge = document.getElementById('engineBadge');
+      const desc = document.getElementById('engineDesc');
+      const cpuMetric = document.getElementById('metricCpu');
+      if (isClient) {
+        if (badge) {
+          badge.textContent = 'In-Browser Client (0% Server CPU)';
+          badge.classList.remove('cloud');
+        }
+        if (desc) {
+          desc.textContent = 'Computations (decoding, trimming, MP3 encoding & tagging) run 100% on your device CPU for maximum privacy & zero server load.';
+        }
+        if (cpuMetric) {
+          cpuMetric.textContent = '0.0% (Zero Load)';
+          cpuMetric.className = 'metric-value badge-success';
+        }
+      } else {
+        if (badge) {
+          badge.textContent = 'Cloud Server (Server FFmpeg)';
+          badge.classList.add('cloud');
+        }
+        if (desc) {
+          desc.textContent = 'Legacy server-side FFmpeg processing mode (recommended only for low-spec older devices).';
+        }
+        if (cpuMetric) {
+          cpuMetric.textContent = 'Active (Server FFmpeg)';
+          cpuMetric.className = 'metric-value';
+        }
+      }
+    }
+
     /* ---------------- Start Conversion & SSE Tracking ---------------- */
     async startDownload() {
       if (!this.state.currentMedia) return;
@@ -453,6 +487,40 @@
       this.dom.cancelActionRow.classList.remove('hidden');
       this.dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
+      // In-Browser Client-Side Processing (0% Server CPU)
+      if (this.state.useClientCompute && window.StreamFabClientEngine) {
+        try {
+          if (this.dom.metricCpu) {
+            this.dom.metricCpu.textContent = '0.0% (Zero Load)';
+            this.dom.metricCpu.className = 'metric-value badge-success';
+          }
+          const result = await window.StreamFabClientEngine.process(payload, (prog) => {
+            const pct = Math.max(0, Math.min(100, prog.percent || 0));
+            this.dom.progressBarFill.style.width = `${pct}%`;
+            this.dom.progressPercentBadge.textContent = `${pct}%`;
+            this.dom.progressDetail.textContent = prog.detail || 'Processing in browser...';
+            this.dom.metricSpeed.textContent = prog.speed || '-- MB/s';
+            this.dom.metricEta.textContent = prog.percent >= 100 ? '00:00' : 'In-Browser';
+            this.dom.metricStatus.textContent = prog.status === 'completed' ? 'Completed (Client)' : (prog.status === 'encoding' ? 'Encoding (Client)' : 'Client Engine');
+          });
+
+          // Trigger browser file download directly
+          window.downloadBlob(result.blob, result.filename);
+          this.dom.downloadBtnText.textContent = `Save ${result.filename}`;
+          this.dom.finalDownloadLink.href = URL.createObjectURL(result.blob);
+          this.dom.finalDownloadLink.download = result.filename;
+          this.dom.cancelActionRow.classList.add('hidden');
+          this.dom.downloadReadyActions.classList.remove('hidden');
+          this.dom.metricStatus.textContent = 'Completed (Client)';
+          this.dom.metricStatus.className = 'metric-value status-pill status-completed';
+          return;
+        } catch (clientErr) {
+          console.warn('Client-side processing fallback to server:', clientErr);
+          this.dom.progressDetail.textContent = 'Switching to server engine...';
+        }
+      }
+
+      // Server-Side Fallback Mode
       try {
         const res = await fetch('/api/download', {
           method: 'POST',

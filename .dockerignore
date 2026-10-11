@@ -1,0 +1,17 @@
+.git
+.gitignore
+.pytest_cache
+.coverage
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+env/
+venv/
+downloads/
+tests/
+.agent/
+.system_generated/
+*.log

@@ -10,10 +10,12 @@ import asyncio
 import json
 import os
 import re
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -27,6 +29,12 @@ from engine import (
     engine,
     extract_media_info,
     parse_timestamp,
+    resolve_stream_urls,
+)
+from security import (
+    SecurityHeadersMiddleware,
+    sanitize_filename,
+    validate_and_sanitize_url,
 )
 
 app = FastAPI(
@@ -34,6 +42,9 @@ app = FastAPI(
     description="Ultra-fast media conversion and download engine surpassing NoTube.",
     version="2.0.0",
 )
+
+# Apply strict security headers & rate limiting
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Enable CORS for local and remote web access
 app.add_middleware(
@@ -127,6 +138,92 @@ async def get_info(req: InfoRequest) -> Dict[str, Any]:
         ) from exc
 
 
+class StreamUrlsRequest(BaseModel):
+    url: str
+    media_type: str = Field(default="audio")  # audio or video
+    audio_format: str = Field(default="mp3")
+    audio_quality: str = Field(default="320k")
+    video_format: str = Field(default="mp4")
+    video_quality: str = Field(default="best")
+
+
+@app.post("/api/stream-urls")
+async def get_stream_urls(req: StreamUrlsRequest) -> Dict[str, Any]:
+    """Resolve direct/proxied stream URLs for zero-server-CPU client-side processing."""
+    loop = asyncio.get_running_loop()
+    try:
+        data = await loop.run_in_executor(
+            None,
+            resolve_stream_urls,
+            req.url,
+            req.media_type,
+            req.video_quality,
+            req.video_format,
+            req.audio_format,
+        )
+        result = dict(data)
+        if data.get("audio_stream_url"):
+            result["audio_proxy_url"] = f"/api/proxy-stream?url={urllib.parse.quote(data['audio_stream_url'])}"
+        if data.get("video_stream_url"):
+            result["video_proxy_url"] = f"/api/proxy-stream?url={urllib.parse.quote(data['video_stream_url'])}"
+        if data.get("combined_stream_url"):
+            result["combined_proxy_url"] = f"/api/proxy-stream?url={urllib.parse.quote(data['combined_stream_url'])}"
+        return {"success": True, "data": result}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get("/api/proxy-stream")
+async def proxy_stream(url: str, request: Request) -> StreamingResponse:
+    """Zero-CPU asynchronous stream pass-through with Range support for browser clients."""
+    try:
+        safe_url = validate_and_sanitize_url(url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid stream URL: {exc}")
+
+    range_header = request.headers.get("range")
+    req_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    if range_header:
+        req_headers["Range"] = range_header
+
+    client = httpx.AsyncClient(timeout=60.0, follow_redirects=True)
+    try:
+        upstream_req = client.build_request("GET", safe_url, headers=req_headers)
+        upstream_resp = await client.send(upstream_req, stream=True)
+    except Exception as exc:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"Upstream stream error: {exc}")
+
+    resp_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+    }
+    for h in ("content-type", "content-length", "content-range"):
+        if h in upstream_resp.headers:
+            resp_headers[h] = upstream_resp.headers[h]
+
+    async def stream_generator():
+        try:
+            async for chunk in upstream_resp.aiter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            await upstream_resp.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        stream_generator(),
+        status_code=upstream_resp.status_code,
+        headers=resp_headers,
+        media_type=upstream_resp.headers.get("content-type", "application/octet-stream"),
+    )
+
+
 @app.post("/api/download")
 async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Initiate a download task with high performance settings."""
@@ -203,13 +300,27 @@ async def download_file(task_id: str) -> FileResponse:
         raise HTTPException(status_code=400, detail="Invalid task ID.")
 
     task = engine.get_task(task_id)
-    if not task or task.progress.status != "completed" or not task.progress.file_path:
+    file_path: Optional[Path] = None
+    filename: Optional[str] = None
+
+    if task and task.progress.status == "completed" and task.progress.file_path:
+        file_path = Path(task.progress.file_path).resolve()
+        filename = task.progress.filename or file_path.name
+    else:
+        # Fallback check on disk in case server restarted or task evicted
+        expected_dir = (DOWNLOADS_DIR / task_id).resolve()
+        if expected_dir.is_dir():
+            files = [f for f in expected_dir.iterdir() if f.is_file() and not f.name.endswith((".part", ".ytdl"))]
+            if files:
+                file_path = max(files, key=lambda f: f.stat().st_size).resolve()
+                filename = sanitize_filename(file_path.name)
+
+    if not file_path or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not ready or task does not exist.")
 
-    file_path = Path(task.progress.file_path).resolve()
     # Path traversal check: verify the file is strictly inside the task's directory
     expected_dir = (DOWNLOADS_DIR / task_id).resolve()
-    if not file_path.is_relative_to(expected_dir) or not file_path.is_file():
+    if not file_path.is_relative_to(expected_dir):
         raise HTTPException(status_code=403, detail="Unauthorized access.")
 
     # Determine safe media type
@@ -228,7 +339,7 @@ async def download_file(task_id: str) -> FileResponse:
 
     return FileResponse(
         path=str(file_path),
-        filename=task.progress.filename or file_path.name,
+        filename=filename or file_path.name,
         media_type=content_type,
         content_disposition_type="attachment",
     )

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 import yt_dlp
+from yt_dlp.utils import download_range_func
 from security import (
     sanitize_filename,
     validate_and_sanitize_url,
@@ -408,16 +409,14 @@ class EngineManager:
         safe_url = validate_and_sanitize_url(opts.url)
         opts.url = safe_url
 
-        out_template = str(out_dir / "%(title)s.%(ext)s")
-
         task.progress.status = "downloading"
         task.progress.detail = "Initializing ultra-fast stream..."
         task.notify_subscribers()
 
         ydl_opts: Dict[str, Any] = {
-            "outtmpl": out_template,
+            "paths": {"home": str(out_dir)},
+            "outtmpl": {"default": "%(title)s.%(ext)s"},
             "windowsfilenames": True,
-            "trim_file_name": 80,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True if not opts.playlist_indices else False,
@@ -430,16 +429,17 @@ class EngineManager:
             "max_filesize": 2 * 1024 * 1024 * 1024,  # 2 GB limit per download
         }
 
-        # Validate timestamps strictly
+        # Validate timestamps strictly & configure ultra-efficient segment trimming
         trim_start_sec = validate_timestamp_strict(opts.trim_start) if opts.trim_start else None
         trim_end_sec = validate_timestamp_strict(opts.trim_end) if opts.trim_end else None
-        ffmpeg_post_args = []
-        if trim_start_sec is not None:
-            ffmpeg_post_args.extend(["-ss", str(trim_start_sec)])
         if trim_end_sec is not None:
             if trim_start_sec is not None and trim_end_sec <= trim_start_sec:
                 raise ValueError("End time must be greater than start time.")
-            ffmpeg_post_args.extend(["-to", str(trim_end_sec)])
+
+        if trim_start_sec is not None or trim_end_sec is not None:
+            start_val = trim_start_sec if trim_start_sec is not None else 0.0
+            end_val = trim_end_sec if trim_end_sec is not None else float("inf")
+            ydl_opts["download_ranges"] = download_range_func(None, [(start_val, end_val)])
 
         # Audio conversion
         if opts.media_type == "audio":
@@ -481,19 +481,18 @@ class EngineManager:
         # Metadata embedding
         if opts.embed_metadata:
             ydl_opts.setdefault("postprocessors", []).append({"key": "FFmpegMetadata"})
-        if opts.embed_thumbnail and opts.media_type in ("audio", "video"):
+        if opts.embed_thumbnail and opts.media_type == "audio":
             ydl_opts["writethumbnail"] = True
-            ydl_opts.setdefault("postprocessors", []).append({"key": "EmbedThumbnail"})
+            ydl_opts.setdefault("postprocessors", []).extend([
+                {"key": "FFmpegThumbnailsConvertor", "format": "jpg"},
+                {"key": "EmbedThumbnail"},
+            ])
 
         # Subtitles (validate lang code)
         if opts.subtitle_lang and re.match(r"^[a-zA-Z]{2,3}(-[a-zA-Z]{2})?$", opts.subtitle_lang):
             ydl_opts["writesubtitles"] = True
             ydl_opts["subtitleslangs"] = [opts.subtitle_lang, "en"]
             ydl_opts.setdefault("postprocessors", []).append({"key": "FFmpegEmbedSubtitle"})
-
-        # FFmpeg trimming
-        if ffmpeg_post_args:
-            ydl_opts["postprocessor_args"] = {"ffmpeg": ffmpeg_post_args}
 
         # Playlist items
         if opts.playlist_indices:
@@ -559,6 +558,100 @@ class EngineManager:
         mb_size = task.progress.file_size / (1024 * 1024)
         task.progress.detail = f"Completed! File ready ({mb_size:.2f} MB)."
         task.notify_subscribers()
+
+
+
+def resolve_stream_urls(
+    url: str,
+    media_type: str = "audio",
+    video_quality: str = "best",
+    video_format: str = "mp4",
+    audio_format: str = "mp3",
+) -> Dict[str, Any]:
+    """Resolve direct CDN stream URLs for zero-server-CPU client-side processing."""
+    safe_url = validate_and_sanitize_url(url)
+    ydl_opts: Dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignoreconfig": True,
+        "no_exec": True,
+        "socket_timeout": 15,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(safe_url, download=False)
+
+    if not info:
+        raise ValueError("Could not extract stream URLs.")
+
+    title = info.get("title", "Media")
+    uploader = info.get("uploader") or info.get("channel") or ""
+    duration = info.get("duration", 0)
+    thumbnail = info.get("thumbnail")
+    formats = info.get("formats") or []
+
+    # 1. Best audio-only stream
+    audio_formats = [
+        f for f in formats
+        if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
+    ]
+    best_audio = None
+    if audio_formats:
+        best_audio = max(audio_formats, key=lambda f: f.get("abr") or f.get("tbr") or 0)
+    else:
+        # Fallback to any format with audio
+        for f in reversed(formats):
+            if f.get("url") and f.get("acodec") != "none":
+                best_audio = f
+                break
+
+    # 2. Video streams
+    target_height = 1080
+    if video_quality == "2160p":
+        target_height = 2160
+    elif video_quality == "1440p":
+        target_height = 1440
+    elif video_quality == "1080p":
+        target_height = 1080
+    elif video_quality == "720p":
+        target_height = 720
+    elif video_quality == "480p":
+        target_height = 480
+    elif video_quality == "360p":
+        target_height = 360
+    elif video_quality == "worst":
+        target_height = 144
+
+    best_video = None
+    combined_stream = None
+
+    for f in formats:
+        if f.get("url") and f.get("vcodec") != "none":
+            h = f.get("height") or 0
+            if video_quality == "best" or h <= target_height:
+                if not best_video or h > (best_video.get("height") or 0):
+                    best_video = f
+            if f.get("acodec") != "none" and (video_quality == "best" or h <= target_height):
+                if not combined_stream or h > (combined_stream.get("height") or 0):
+                    combined_stream = f
+
+    return {
+        "title": title,
+        "uploader": uploader,
+        "duration": duration,
+        "duration_formatted": format_duration(duration),
+        "thumbnail": thumbnail,
+        "media_type": media_type,
+        "audio_stream_url": best_audio.get("url") if best_audio else None,
+        "audio_codec": best_audio.get("acodec") if best_audio else "unknown",
+        "audio_ext": best_audio.get("ext") if best_audio else "m4a",
+        "video_stream_url": best_video.get("url") if best_video else None,
+        "video_codec": best_video.get("vcodec") if best_video else "unknown",
+        "video_ext": best_video.get("ext") if best_video else "mp4",
+        "video_height": best_video.get("height") if best_video else target_height,
+        "combined_stream_url": combined_stream.get("url") if combined_stream else None,
+        "has_combined_stream": combined_stream is not None,
+    }
 
 
 engine = EngineManager()

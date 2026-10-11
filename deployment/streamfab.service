@@ -1,0 +1,26 @@
+[Unit]
+Description=StreamFab High-Performance Media Conversion Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/streamfab
+Environment="PATH=/var/www/streamfab/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/var/www/streamfab/venv/bin/python src/downloader.py --web --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+# Sandboxing and security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

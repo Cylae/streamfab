@@ -199,8 +199,8 @@ def test_execute_download_sync_video_and_trim(mock_ydl_class):
 
     def fake_download(urls):
         opts_passed = mock_ydl_class.call_args[0][0]
-        assert "postprocessor_args" in opts_passed
-        assert opts_passed["postprocessor_args"]["ffmpeg"] == ["-ss", "10.0", "-to", "45.0"]
+        assert "download_ranges" in opts_passed
+        assert callable(opts_passed["download_ranges"])
         assert opts_passed["writesubtitles"] is True
         dummy_out = task._output_dir / "Clipped_Video.mp4"
         dummy_out.write_bytes(b"dummy mp4 data")
@@ -244,4 +244,106 @@ def test_execute_download_sync_failure_code(mock_ydl_class):
 
     with pytest.raises(RuntimeError, match="yt-dlp exit code: 1"):
         mgr._execute_download_sync(task)
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_windows_options_in_ydl_opts(mock_ydl_class):
+    mgr = EngineManager()
+    opts = DownloadOptions(url="https://example.com/video")
+    task = mgr.create_task(opts)
+
+    mock_instance = mock_ydl_class.return_value.__enter__.return_value
+
+    def fake_download(urls):
+        opts_passed = mock_ydl_class.call_args[0][0]
+        assert opts_passed.get("windowsfilenames") is True
+        assert opts_passed.get("paths", {}).get("home") == str(task._output_dir)
+        assert "%(title)s.%(ext)s" in str(opts_passed.get("outtmpl"))
+        dummy_out = task._output_dir / "Video.mp4"
+        dummy_out.write_bytes(b"content")
+        return 0
+
+    mock_instance.download.side_effect = fake_download
+    mgr._execute_download_sync(task)
+    assert task.progress.status == "completed"
+
+
+def test_sanitize_filename_windows_illegal_characters():
+    from security import sanitize_filename
+    # Colons, quotes, question marks, pipes, trailing dots and spaces
+    bad_name = 'My: Cool "Video"? | Awesome.. '
+    cleaned = sanitize_filename(bad_name)
+    assert ":" not in cleaned
+    assert '"' not in cleaned
+    assert "?" not in cleaned
+    assert "|" not in cleaned
+    assert not cleaned.endswith(".")
+    assert not cleaned.endswith(" ")
+
+
+def test_cleanup_old_tasks():
+    from datetime import datetime, timezone, timedelta
+    mgr = EngineManager()
+    opts = DownloadOptions(url="https://example.com/test")
+    task = mgr.create_task(opts)
+    # Manually backdate created_at to 2 hours ago
+    task.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    assert task.task_id in mgr.tasks
+    assert task._output_dir.exists()
+
+    mgr.cleanup_old_tasks()
+    assert task.task_id not in mgr.tasks
+    assert not task._output_dir.exists()
+
+
+def test_multiple_subscribers():
+    opts = DownloadOptions(url="https://example.com/test")
+    task = DownloadTask("sub-test-id", opts)
+    q1 = task.add_subscriber()
+    q2 = task.add_subscriber()
+
+    assert len(task.subscribers) == 2
+    # Both received initial dict
+    assert not q1.empty()
+    assert not q2.empty()
+
+    task.remove_subscriber(q1)
+    assert len(task.subscribers) == 1
+    assert q1 not in task.subscribers
+    assert q2 in task.subscribers
+
+
+@patch('engine.shutil.disk_usage')
+def test_disk_usage_insufficient_space(mock_disk):
+    mock_disk.return_value.free = 50 * 1024 * 1024  # 50 MB
+    mgr = EngineManager()
+    opts = DownloadOptions(url="https://example.com/test")
+    task = mgr.create_task(opts)
+
+    with pytest.raises(RuntimeError, match="Insufficient disk space"):
+        mgr._execute_download_sync(task)
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_resolve_stream_urls(mock_ydl_class):
+    mock_instance = mock_ydl_class.return_value.__enter__.return_value
+    mock_instance.extract_info.return_value = {
+        "title": "Stream Video",
+        "uploader": "StreamUploader",
+        "duration": 180,
+        "thumbnail": "https://example.com/thumb.png",
+        "formats": [
+            {"format_id": "140", "url": "https://cdn.com/audio.m4a", "vcodec": "none", "acodec": "mp4a", "abr": 128, "ext": "m4a"},
+            {"format_id": "137", "url": "https://cdn.com/v1080.mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "ext": "mp4"},
+            {"format_id": "18", "url": "https://cdn.com/v360_combined.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "ext": "mp4"},
+        ]
+    }
+    from engine import resolve_stream_urls
+    res = resolve_stream_urls("https://example.com/watch", media_type="video", video_quality="1080p")
+    assert res["title"] == "Stream Video"
+    assert res["audio_stream_url"] == "https://cdn.com/audio.m4a"
+    assert res["video_stream_url"] == "https://cdn.com/v1080.mp4"
+    assert res["has_combined_stream"] is True
+    assert res["combined_stream_url"] == "https://cdn.com/v360_combined.mp4"
+
 
