@@ -1,6 +1,7 @@
 import argparse
 import sys
 import time
+import webbrowser
 from typing import List, Dict, Any, Optional
 import yt_dlp
 from rich.console import Console
@@ -55,6 +56,7 @@ def is_retryable(exc: Exception) -> bool:
     msg = str(exc).lower()
     return not any(marker in msg for marker in _NON_RETRYABLE_MARKERS)
 
+
 class RichLogger:
     def debug(self, msg: str) -> None:
         pass
@@ -65,15 +67,16 @@ class RichLogger:
     def error(self, msg: str) -> None:
         console.print(f"[red]Error:[/red] {msg}")
 
+
 def get_parser() -> argparse.ArgumentParser:
     """Create and return the argument parser."""
     parser = argparse.ArgumentParser(
-        description="A versatile command-line video downloader for publicly available platforms."
+        description="A versatile command-line and web video downloader for publicly available platforms."
     )
     parser.add_argument(
         "url",
         nargs="?",
-        help="The URL of the video to download. Optional if --batch-file is used."
+        help="The URL of the video to download. Optional if --batch-file or --web is used."
     )
     parser.add_argument(
         "-a", "--batch-file",
@@ -138,8 +141,38 @@ def get_parser() -> argparse.ArgumentParser:
         default=DEFAULT_RETRY_BACKOFF,
         help=f"Base seconds to wait between retries, doubles each attempt (default: {DEFAULT_RETRY_BACKOFF})."
     )
+    parser.add_argument(
+        "--trim-start",
+        help="Start timestamp for trimming (e.g. 00:01:30)."
+    )
+    parser.add_argument(
+        "--trim-end",
+        help="End timestamp for trimming (e.g. 00:02:45)."
+    )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Launch the modern StreamFab Web interface (NoTube alternative)."
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Web server host address (default: 127.0.0.1)."
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Web server port (default: 8000)."
+    )
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Automatically open the default web browser when starting the web server."
+    )
 
     return parser
+
 
 def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
     """Build yt-dlp options dictionary based on parsed arguments."""
@@ -147,7 +180,7 @@ def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
         'outtmpl': args.output,
         'quiet': True,
         'no_warnings': True,
-        'noplaylist': args.no_playlist,
+        'noplaylist': getattr(args, 'no_playlist', False),
         'logger': RichLogger(),
         'progress_hooks': [progress_hook],
     }
@@ -176,14 +209,10 @@ def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
         if args.format in ['mp4', 'mkv']:
             ydl_opts['merge_output_format'] = args.format
 
-            # Helper to generate format string with constraints
             def get_fmt(res_limit: str = "") -> str:
                 if args.format == 'mp4':
                     return f'bestvideo{res_limit}[ext=mp4]+bestaudio[ext=m4a]/bestvideo{res_limit}+bestaudio/best{res_limit}'
                 else:
-                    # For MKV, do not enforce the extension on the downloaded streams,
-                    # because platforms rarely host native MKV streams. Let yt-dlp
-                    # download the best available and merge them into MKV later.
                     return f'bestvideo{res_limit}+bestaudio/best{res_limit}'
 
             if args.quality == '1080p':
@@ -200,36 +229,46 @@ def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
         ydl_opts['format'] = format_str
 
     # Subtitles
-    if args.subtitles:
+    if getattr(args, 'subtitles', False):
         ydl_opts['writesubtitles'] = True
-        ydl_opts['subtitleslangs'] = ['en', 'all'] # try english, fallback to all
+        ydl_opts['subtitleslangs'] = ['en', 'all']
 
     # Metadata and Post-processing
     postprocessors = ydl_opts.get('postprocessors', [])
-    if args.embed_metadata:
+    if getattr(args, 'embed_metadata', False):
         postprocessors.append({'key': 'FFmpegMetadata'})
-    if args.embed_thumbnail:
+    if getattr(args, 'embed_thumbnail', False):
         ydl_opts['writethumbnail'] = True
         postprocessors.append({'key': 'EmbedThumbnail'})
 
     if postprocessors:
         ydl_opts['postprocessors'] = postprocessors
 
+    # Trimming options
+    trim_start = getattr(args, 'trim_start', None)
+    trim_end = getattr(args, 'trim_end', None)
+    ffmpeg_args = []
+    if trim_start:
+        ffmpeg_args.extend(["-ss", trim_start])
+    if trim_end:
+        ffmpeg_args.extend(["-to", trim_end])
+    if ffmpeg_args:
+        ydl_opts["postprocessor_args"] = {"ffmpeg": ffmpeg_args}
+
     return ydl_opts
+
 
 def progress_hook(d: dict) -> None:
     if d['status'] == 'downloading':
         percent = d.get('_percent_str', 'N/A')
         speed = d.get('_speed_str', 'N/A')
         eta = d.get('_eta_str', 'N/A')
-        filename = d.get('filename', 'video')
-        # Only print a clean line that overrides the previous one
-        # Using ANSI escape codes instead of rich tags since we use sys.stdout directly for \r magic
         sys.stdout.write(f"\r\033[K\033[36mDownloading...\033[0m {percent} at {speed} ETA {eta}")
         sys.stdout.flush()
     elif d['status'] == 'finished':
-        print() # New line after the progress bar finishes
+        print()
         console.print("[green]Download finished, processing...[/green]")
+
 
 def download_video(
     urls: List[str],
@@ -238,10 +277,7 @@ def download_video(
     retry_backoff: float = DEFAULT_RETRY_BACKOFF,
     sleep_fn=time.sleep,
 ) -> bool:
-    """Download videos using yt-dlp, retrying transient failures.
-
-    Returns True if all downloads succeeded.
-    """
+    """Download videos using yt-dlp, retrying transient failures."""
     last_exc: Optional[Exception] = None
     attempt = 0
 
@@ -267,14 +303,13 @@ def download_video(
             )
             sleep_fn(wait)
 
-    # Unreachable in practice, but keeps type checkers happy.
     if last_exc is not None:
         console.print(f"[bold red]Critical error during download:[/bold red] {last_exc}")
     return False
 
 
 def list_formats(urls: List[str], ydl_opts: Dict[str, Any]) -> bool:
-    """Print available formats for each URL without downloading. Returns True on success."""
+    """Print available formats for each URL without downloading."""
     list_opts = dict(ydl_opts)
     list_opts["listformats"] = True
     list_opts["quiet"] = False
@@ -291,9 +326,24 @@ def list_formats(urls: List[str], ydl_opts: Dict[str, Any]) -> bool:
         console.print(f"[yellow]Diagnosis:[/yellow] {classify_error(e)}")
         return False
 
+
+def run_web_server(host: str = "127.0.0.1", port: int = 8000, open_browser: bool = False) -> None:
+    """Launch the FastAPI web server with Uvicorn."""
+    import uvicorn
+    console.print(f"[bold green]🚀 StreamFab Web UI running at:[/bold green] [bold cyan]http://{host}:{port}[/bold cyan]")
+    console.print("[dim]Press Ctrl+C to stop the server.[/dim]")
+    if open_browser:
+        webbrowser.open(f"http://{host}:{port}")
+    uvicorn.run("web_server:app", host=host, port=port, log_level="info")
+
+
 def main() -> None:
     parser = get_parser()
     args = parser.parse_args()
+
+    if getattr(args, 'web', False):
+        run_web_server(host=args.host, port=args.port, open_browser=args.open_browser)
+        sys.exit(0)
 
     urls: List[str] = []
     if args.url:
@@ -333,6 +383,7 @@ def main() -> None:
     else:
         console.print("[bold red]✖ Some download(s) failed.[/bold red]")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

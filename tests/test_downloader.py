@@ -345,3 +345,43 @@ def test_main_list_formats(mock_list):
         main()
     assert excinfo.value.code == 0
     mock_list.assert_called_once()
+
+
+def test_parser_web_and_trim_args():
+    parser = get_parser()
+    args = parser.parse_args([
+        '--web',
+        '--host', '0.0.0.0',
+        '--port', '9090',
+        '--open-browser',
+        '--trim-start', '00:01:00',
+        '--trim-end', '00:02:30',
+    ])
+    assert args.web is True
+    assert args.host == '0.0.0.0'
+    assert args.port == 9090
+    assert args.open_browser is True
+    assert args.trim_start == '00:01:00'
+    assert args.trim_end == '00:02:30'
+
+
+def test_build_ydl_opts_with_trim():
+    parser = get_parser()
+    args = parser.parse_args([
+        'https://example.com/video',
+        '--trim-start', '00:00:30',
+        '--trim-end', '00:01:45',
+    ])
+    opts = build_ydl_opts(args)
+    assert 'postprocessor_args' in opts
+    assert opts['postprocessor_args']['ffmpeg'] == ['-ss', '00:00:30', '-to', '00:01:45']
+
+
+@patch('sys.argv', ['downloader.py', '--web', '--port', '8080'])
+@patch('downloader.run_web_server')
+def test_main_web_mode(mock_run_web):
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 0
+    mock_run_web.assert_called_once_with(host='127.0.0.1', port=8080, open_browser=False)
+

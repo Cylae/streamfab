@@ -1,215 +1,204 @@
-# Versatile Video Downloader
+# StreamFab &mdash; Modern Media Downloader &amp; Converter (NoTube Alternative)
 
-A powerful and versatile command-line video downloader written in Python. It supports downloading publicly available, non-DRM protected content from numerous platforms.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com/)
+[![yt--dlp](https://img.shields.io/badge/yt--dlp-2024%2B-red.svg)](https://github.com/yt-dlp/yt-dlp)
+[![Tests](https://img.shields.io/badge/Tests-72%20passed-brightgreen.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
 
-## Features
-
-*   **Download Videos:** Download from any platform supported by `yt-dlp`.
-*   **Format Selection:** Choose between `mp4`, `mkv`, or let the tool pick the `best` format.
-*   **Quality Selection:** Specify video quality (`best`, `1080p`, `720p`, `480p`, `worst`).
-*   **Audio Extraction:** Extract audio only and save it as an MP3 file.
-*   **Subtitles:** Automatically download subtitles when available.
-*   **Batch Downloading:** Read multiple URLs from a text file to download in bulk.
-*   **Playlist Control:** Choose whether to download an entire playlist or just a single video.
-*   **Metadata Embedding:** Embed video metadata (title, author) and thumbnails directly into the downloaded file.
-*   **Smart Retries:** Automatically retries downloads upon transient network failures with exponential backoff.
-*   **List Formats:** Preview all available formats for a video without downloading.
-*   **Custom Output Naming:** Customize the output file name template.
-
-## Requirements
-
-*   Python 3.6 or higher
-*   `yt-dlp`
-*   `pytest` (for running tests)
-*   `ffmpeg` (highly recommended for format conversion and audio extraction)
-
-## Installation
-
-1.  Clone this repository or download the source files.
-2.  Install the required Python packages:
-
-```bash
-pip install -r requirements.txt
-```
-
-3.  Ensure `ffmpeg` is installed on your system.
-    *   **Ubuntu/Debian:** `sudo apt install ffmpeg`
-    *   **macOS:** `brew install ffmpeg`
-    *   **Windows:** Download from the official site and add it to your PATH.
-
-## Usage
-
-Run the `downloader.py` script from the `src` directory:
-
-```bash
-python3 src/downloader.py [options] [URL]
-```
-
-### Options
-
-*   `URL`: The URL of the video to download (Optional if `--batch-file` is provided).
-*   `-a`, `--batch-file`: File containing URLs to download, one per line.
-*   `-f`, `--format`: Specify the desired video format (`mp4`, `mkv`, `best`). Default is `best`.
-*   `-q`, `--quality`: Specify the desired video quality (`best`, `1080p`, `720p`, `480p`, `worst`). Default is `best`.
-*   `--extract-audio`: Extract audio only (saves as MP3).
-*   `--subtitles`: Download subtitles if available.
-*   `--no-playlist`: Download only the single video, ignoring the rest of the playlist if the URL is part of one.
-*   `--embed-metadata`: Embed video metadata (title, artist, etc.) in the output file.
-*   `--embed-thumbnail`: Embed the video's thumbnail as cover art.
-*   `--list-formats`: List available formats for the URL(s) and exit, without downloading.
-*   `--max-retries`: Number of retry attempts on transient failure (default: 3).
-*   `--retry-backoff`: Base seconds to wait between retries, doubles each attempt (default: 2.0).
-*   `-o`, `--output`: Output filename template (e.g., `%(title)s.%(ext)s`).
-
-### Examples
-
-**Download a video with default settings (best quality):**
-```bash
-python3 src/downloader.py "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download a video in 720p MP4 format:**
-```bash
-python3 src/downloader.py -f mp4 -q 720p "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Extract only the audio as an MP3:**
-```bash
-python3 src/downloader.py --extract-audio "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download a video with subtitles and save to a specific directory:**
-```bash
-python3 src/downloader.py --subtitles -o "~/Downloads/%(title)s.%(ext)s" "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download a video with embedded metadata and thumbnail:**
-```bash
-python3 src/downloader.py --embed-metadata --embed-thumbnail "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download multiple videos from a text file (e.g., `urls.txt`):**
-```bash
-python3 src/downloader.py -a urls.txt
-```
-
-## Testing
-
-To run the automated tests, execute `pytest` from the root directory:
-
-```bash
-pytest tests/
-```
-
-## Disclaimer
-
-This tool is intended solely for downloading unprotected, publicly available content. It does not bypass Digital Rights Management (DRM) or download protected content from commercial streaming platforms. Users are responsible for ensuring they have the legal right to download and use the content they access with this tool.
+> A high-performance, ad-free, privacy-friendly video & audio converter and downloader. Designed to completely outclass legacy web converters like **NoTube** with turbo multi-fragment downloads, lossless audio (FLAC/MP3 320k), 4K 60fps video, interactive trimming, playlist batching, and real-time SSE progress tracking. Available both as a modern Web App and a versatile CLI.
 
 ---
 
-# Versatile Video Downloader (Français)
+## ⚡ StreamFab vs NoTube Comparison
 
-Un puissant et polyvalent téléchargeur de vidéos en ligne de commande, écrit en Python. Il prend en charge le téléchargement de contenu accessible au public et non protégé par DRM depuis de nombreuses plateformes.
+| Evaluation Metric | NoTube & Legacy Converters | StreamFab PRO (Our Engine) |
+|---|---|---|
+| **Ads & Popups** | 🚨 Intrusive, deceptive redirects, malware risks | 🛡️ **0 Ads, 0 Trackers, 100% Clean** |
+| **Max Video Resolution** | 🔒 Often capped at 720p or compressed 1080p | 💎 **True 4K 60fps & 2K QHD Lossless** |
+| **Audio Quality** | ⚠️ Standard compressed MP3 (128-192 kbps) | 🎧 **MP3 320 kbps HD, Lossless FLAC, Studio WAV** |
+| **Built-in Trimmer (Trim & Cut)** | ❌ Missing (forces full video download) | ✂️ **Precise down-to-the-second trimming** |
+| **Playlists & Batch Downloads** | ❌ 1-by-1 manual or paywalled | 📋 **Full playlists with individual video selection** |
+| **Processing Speed** | 🐢 Overcrowded, slow server queues | ⚡ **Turbo Acceleration (8 simultaneous fragments)** |
+| **In-App Media Player** | ❌ No preview available before conversion | 🎬 **Built-in audio/video player in the Web App** |
+| **Subtitles & Metadata** | ❌ Not supported | 📝 **Multi-language subtitles & ID3 tags + HD cover art** |
 
-## Fonctionnalités
+---
 
-*   **Téléchargement de vidéos :** Téléchargez depuis n'importe quelle plateforme prise en charge par `yt-dlp`.
-*   **Sélection du format :** Choisissez entre `mp4`, `mkv`, ou laissez l'outil choisir le `best` (meilleur) format.
-*   **Sélection de la qualité :** Spécifiez la qualité vidéo (`best`, `1080p`, `720p`, `480p`, `worst`).
-*   **Extraction audio :** Extrayez uniquement l'audio et enregistrez-le sous forme de fichier MP3.
-*   **Sous-titres :** Téléchargez automatiquement les sous-titres lorsqu'ils sont disponibles.
-*   **Téléchargement par lots :** Lisez plusieurs URL à partir d'un fichier texte pour un téléchargement groupé.
-*   **Contrôle des playlists :** Choisissez de télécharger une playlist entière ou juste une seule vidéo.
-*   **Intégration des métadonnées :** Intégrez les métadonnées de la vidéo (titre, auteur) et les miniatures directement dans le fichier téléchargé.
-*   **Nouvelles tentatives intelligentes :** Relance automatiquement les téléchargements en cas d'erreurs réseau passagères, avec un délai d'attente exponentiel.
-*   **Liste des formats :** Prévisualisez tous les formats disponibles pour une vidéo sans la télécharger.
-*   **Nommage de sortie personnalisé :** Personnalisez le modèle de nom de fichier de sortie.
+## 🚀 Quick Start
 
-## Prérequis
+### 1. Requirements
 
-*   Python 3.6 ou supérieur
-*   `yt-dlp`
-*   `pytest` (pour l'exécution des tests)
-*   `ffmpeg` (fortement recommandé pour la conversion de format et l'extraction audio)
+- Python 3.10 or higher
+- `ffmpeg` installed and available in PATH (Ubuntu: `sudo apt install ffmpeg`, macOS: `brew install ffmpeg`, Windows: `winget install Gyan.FFmpeg` or official binary)
 
-## Installation
-
-1.  Clonez ce dépôt ou téléchargez les fichiers sources.
-2.  Installez les packages Python requis :
+### 2. Installation
 
 ```bash
+git clone https://github.com/Cylae/streamfab.git
+cd streamfab
 pip install -r requirements.txt
 ```
 
-3.  Assurez-vous que `ffmpeg` est installé sur votre système.
-    *   **Ubuntu/Debian :** `sudo apt install ffmpeg`
-    *   **macOS :** `brew install ffmpeg`
-    *   **Windows :** Téléchargez-le depuis le site officiel et ajoutez-le à votre variable d'environnement PATH.
-
-## Utilisation
-
-Exécutez le script `downloader.py` depuis le répertoire `src` :
+### 3. Launch the Web Interface (NoTube Alternative)
 
 ```bash
-python3 src/downloader.py [options] [URL]
+# Launch on http://127.0.0.1:8000
+python src/downloader.py --web
+
+# Or with custom port and auto-opening browser:
+python src/downloader.py --web --port 8080 --open-browser
 ```
 
-### Options
+Then open your browser at **http://127.0.0.1:8000/**.
 
-*   `URL` : L'URL de la vidéo à télécharger (Facultatif si `--batch-file` est fourni).
-*   `-a`, `--batch-file` : Fichier contenant les URL à télécharger, une par ligne.
-*   `-f`, `--format` : Spécifiez le format vidéo souhaité (`mp4`, `mkv`, `best`). Par défaut, c'est `best`.
-*   `-q`, `--quality` : Spécifiez la qualité vidéo souhaitée (`best`, `1080p`, `720p`, `480p`, `worst`). Par défaut, c'est `best`.
-*   `--extract-audio` : Extrait uniquement l'audio (sauvegardé en MP3).
-*   `--subtitles` : Télécharge les sous-titres s'ils sont disponibles.
-*   `--no-playlist` : Télécharge uniquement la vidéo, en ignorant le reste de la playlist si l'URL en fait partie.
-*   `--embed-metadata` : Intègre les métadonnées de la vidéo (titre, artiste, etc.) dans le fichier de sortie.
-*   `--embed-thumbnail` : Intègre la miniature de la vidéo en tant que pochette.
-*   `--list-formats` : Liste les formats disponibles pour la/les URL(s) et quitte, sans télécharger.
-*   `--max-retries` : Nombre de tentatives de relance en cas d'erreur réseau passagère (par défaut : 3).
-*   `--retry-backoff` : Temps d'attente de base en secondes entre les tentatives, double à chaque essai (par défaut : 2.0).
-*   `-o`, `--output` : Modèle de nom de fichier de sortie (par exemple, `%(title)s.%(ext)s`).
+---
 
-### Exemples
+## 💻 CLI Usage
 
-**Télécharger une vidéo avec les paramètres par défaut (meilleure qualité) :**
-```bash
-python3 src/downloader.py "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Télécharger une vidéo au format MP4 720p :**
-```bash
-python3 src/downloader.py -f mp4 -q 720p "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Extraire uniquement l'audio sous forme de MP3 :**
-```bash
-python3 src/downloader.py --extract-audio "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Télécharger une vidéo avec des sous-titres et l'enregistrer dans un répertoire spécifique :**
-```bash
-python3 src/downloader.py --subtitles -o "~/Downloads/%(title)s.%(ext)s" "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Télécharger une vidéo avec les métadonnées et la miniature intégrées :**
-```bash
-python3 src/downloader.py --embed-metadata --embed-thumbnail "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Télécharger plusieurs vidéos à partir d'un fichier texte (ex. `urls.txt`) :**
-```bash
-python3 src/downloader.py -a urls.txt
-```
-
-## Tests
-
-Pour exécuter les tests automatisés, lancez `pytest` depuis le répertoire racine :
+StreamFab can also be operated as a powerful command-line tool with zero configuration:
 
 ```bash
-pytest tests/
+python src/downloader.py [options] [URL]
 ```
 
-## Avertissement
+### CLI Examples
 
-Cet outil est destiné uniquement au téléchargement de contenu accessible au public et non protégé. Il ne contourne pas la gestion des droits numériques (DRM) et ne télécharge pas de contenu protégé depuis des plateformes de streaming commerciales. Les utilisateurs sont responsables de s'assurer qu'ils ont le droit légal de télécharger et d'utiliser le contenu auquel ils accèdent avec cet outil.
+**Download a video in Best Quality (up to 4K):**
+```bash
+python src/downloader.py "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Extract Ultra HD Audio (MP3 320kbps):**
+```bash
+python src/downloader.py --extract-audio "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Download only a specific clip (Trimming):**
+```bash
+python src/downloader.py --trim-start "00:01:30" --trim-end "00:02:45" "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Download with embedded subtitles and metadata:**
+```bash
+python src/downloader.py --subtitles --embed-metadata --embed-thumbnail "https://www.youtube.com/watch?v=BaW_jenozKc"
+```
+
+**Download batch URLs from a file:**
+```bash
+python src/downloader.py -a urls.txt
+```
+
+### Complete CLI Options
+
+| Argument | Description | Default |
+|---|---|---|
+| `url` | URL of the media or playlist to download | None |
+| `-a`, `--batch-file` | File containing multiple URLs (one per line) | None |
+| `-f`, `--format` | Output container format (`mp4`, `mkv`, `best`) | `best` |
+| `-q`, `--quality` | Video quality target (`best`, `1080p`, `720p`, `480p`, `worst`) | `best` |
+| `--extract-audio` | Extract audio only and convert to MP3 | False |
+| `--trim-start` | Start timestamp for trimming (e.g. `00:01:30`) | None |
+| `--trim-end` | End timestamp for trimming (e.g. `00:02:45`) | None |
+| `--subtitles` | Download and embed available subtitles | False |
+| `--no-playlist` | Download single video if part of playlist | False |
+| `--embed-metadata` | Embed ID3 tags, title, artist, uploader | False |
+| `--embed-thumbnail` | Embed high-resolution cover art | False |
+| `--list-formats` | List all available stream formats without downloading | False |
+| `--max-retries` | Number of retries on transient network errors | 3 |
+| `--web` | Launch the modern StreamFab Web App | False |
+| `--port` | Port for the web server | 8000 |
+| `--host` | Host address for the web server | 127.0.0.1 |
+| `--open-browser` | Open web browser automatically | False |
+
+---
+
+## 🌐 REST & SSE API Reference
+
+StreamFab includes an asynchronous FastAPI backend:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/` | `GET` | Serves the responsive SPA web frontend |
+| `/api/health` | `GET` | Health check endpoint returning service status |
+| `/api/info` | `POST` | Instant media analysis (title, uploader, thumbnail, formats, subtitles, playlist items) |
+| `/api/download` | `POST` | Dispatches background conversion task with turbo multi-fragment engine |
+| `/api/progress/{task_id}` | `GET` | Server-Sent Events (SSE) streaming real-time progress (% %, speed, ETA, status) |
+| `/api/file/{task_id}` | `GET` | Downloads the converted file with resume support and safe path validation |
+| `/api/cancel/{task_id}` | `POST` | Cancels an ongoing task cleanly |
+
+### API Example: Start Conversion
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/download" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+    "media_type": "audio",
+    "audio_format": "mp3",
+    "audio_quality": "320k",
+    "trim_start": "00:00:30",
+    "trim_end": "00:01:30"
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "task_id": "7f8b9d3e-4b6a-4d92-91ea-0d7281f62b11",
+  "status": "downloading"
+}
+```
+
+---
+
+## 🧪 Testing
+
+Execute the test suite with `pytest`:
+
+```bash
+pytest
+```
+
+Run test suite with coverage report:
+
+```bash
+pytest --cov=src --cov-report=term-missing
+```
+
+The test suite covers:
+- CLI argument parsing, defaults, batch files, errors, format listing, retry backoff heuristics
+- Engine metadata caching, duration formatting, timestamp parsing, error classification
+- Concurrent fragment options, FFmpeg trimming postprocessor arguments, cancellation safety
+- Web API endpoints (`/api/health`, `/api/info`, `/api/download`, `/api/file`, `/api/progress`, path traversal defenses)
+
+---
+
+## 🏛️ Architecture & Design Decisions (ADRs)
+
+1. **ADR-001: Server-Sent Events (SSE) over WebSockets**
+   - *Context:* Need real-time progress streaming for progress bars, download speed, and ETA.
+   - *Decision:* Use SSE (`text/event-stream` via FastAPI `StreamingResponse`) instead of WebSockets.
+   - *Reason:* SSE is native in all modern browsers (`EventSource`), firewall and proxy-friendly, auto-reconnecting, HTTP/2 multiplexed, and requires no external WebSocket state or handshakes.
+
+2. **ADR-002: In-Memory Metadata Caching with TTL**
+   - *Context:* Users frequently toggle between audio and video or adjust trimming timestamps for the same URL.
+   - *Decision:* Implement bounded in-memory caching with a 5-minute TTL.
+   - *Reason:* Eliminates redundant network queries to YouTube/TikTok APIs, providing instantaneous format updates and trimming changes.
+
+3. **ADR-003: UUID-Isolated Task Storage & Path Traversal Immunity**
+   - *Context:* Web applications downloading files to disk must be immune to directory traversal.
+   - *Decision:* Every task is strictly keyed by a standard UUIDv4 and isolated in `DOWNLOADS_DIR / <uuid>`.
+   - *Reason:* User input can never control storage directories or file paths. `/api/file/{task_id}` enforces `is_relative_to(expected_dir)`.
+
+4. **ADR-004: Dual-Engine Architecture (CLI & Web Share Same Core)**
+   - *Context:* Both the command-line interface and the web interface need high-performance downloading and conversion.
+   - *Decision:* Centralize download logic, options building, and error diagnosis in `engine.py`, leaving `downloader.py` and `web_server.py` as clean client adapters.
+   - *Reason:* Zero duplicated logic, unified error classification, and 100% backward compatibility with existing workflows.
+
+---
+
+## ⚖️ Legal Disclaimer
+
+This software is intended solely for downloading publicly available, non-DRM protected content for personal, archival, or educational use. It does not circumvent Digital Rights Management (DRM) or technical protection measures. Users are responsible for complying with the Terms of Service of content platforms and local copyright regulations.

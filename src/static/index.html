@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamFab - High-Performance Video &amp; Audio Downloader &amp; Converter (NoTube Alternative)</title>
+  <meta name="description" content="Download and convert YouTube, TikTok, X, Instagram videos to MP3 320k, FLAC, and MP4 up to 4K. Ultra-fast, ad-free, with built-in trimmer.">
+  <meta property="og:title" content="StreamFab - Ultra-Fast Video &amp; Audio Converter">
+  <meta property="og:description" content="The modern, clean alternative to NoTube. Ad-free, up to 4K 60fps and MP3 320k.">
+  <meta property="og:type" content="website">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23ff2e63'/%3E%3Cpath d='M12 9.5L23 16L12 22.5V9.5Z' fill='%23fff'/%3E%3C/svg%3E">
+  
+  <!-- Modern Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <!-- Ambient background glow elements -->
+  <div class="ambient-glow glow-1" aria-hidden="true"></div>
+  <div class="ambient-glow glow-2" aria-hidden="true"></div>
+  <div class="ambient-glow glow-3" aria-hidden="true"></div>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="container header-inner">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" class="logo-icon">
+            <rect width="32" height="32" rx="9" fill="url(#brandGrad)" />
+            <path d="M12 9.5L23 16L12 22.5V9.5Z" fill="#FFFFFF" />
+            <path d="M9 13.5L14 16L9 18.5V13.5Z" fill="rgba(255,255,255,0.4)" />
+            <defs>
+              <linearGradient id="brandGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#FF2E63" />
+                <stop offset="0.5" stop-color="#FF5722" />
+                <stop offset="1" stop-color="#9C27B0" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">StreamFab <span class="badge-pro">PRO v2</span></div>
+          <div class="brand-subtitle">Ultra-Fast Engine &middot; 0 Ads</div>
+        </div>
+      </div>
+
+      <nav class="header-nav">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#comparison" class="nav-link">vs NoTube</a>
+        <a href="#faq" class="nav-link">FAQ</a>
+        <button id="themeToggleBtn" class="btn-icon theme-toggle" aria-label="Toggle light/dark theme" title="Toggle theme">
+          <span class="sun-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          </span>
+          <span class="moon-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container main-content">
+    
+    <!-- Hero Section -->
+    <section class="hero-section text-center">
+      <div class="pill-badge">
+        <span class="pill-dot"></span>
+        <span>Universal Downloader &middot; 8x Multi-Fragment Turbo Speed</span>
+      </div>
+      <h1 class="hero-title">
+        Download &amp; Convert <br>
+        <span class="text-gradient">Faster &amp; Without Limits</span>
+      </h1>
+      <p class="hero-desc">
+        The raw power of FFmpeg and yt-dlp unified into a sleek, ad-free interface. Convert to MP3 320k, FLAC, or MP4 4K without ads, waiting queues, or malware.
+      </p>
+
+      <!-- Search Input Container -->
+      <div class="search-box-wrapper glass-card">
+        <form id="urlForm" class="search-form" onsubmit="event.preventDefault(); window.app.handleAnalyze();">
+          <div class="search-input-group">
+            <span class="search-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </span>
+            <input 
+              type="url" 
+              id="urlInput" 
+              name="url" 
+              class="search-input" 
+              placeholder="Paste video URL (YouTube, TikTok, Twitter/X, Instagram, etc.)..." 
+              required 
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <div class="input-actions">
+              <button type="button" id="pasteBtn" class="btn-paste" title="Paste from clipboard">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                <span>Paste</span>
+              </button>
+              <button type="button" id="clearBtn" class="btn-clear hidden" title="Clear" aria-label="Clear">
+                &times;
+              </button>
+            </div>
+          </div>
+          <button type="submit" id="analyzeBtn" class="btn-primary btn-cta">
+            <span class="btn-text">Analyze &amp; Configure</span>
+            <span class="btn-spinner hidden" aria-hidden="true"></span>
+          </button>
+        </form>
+
+        <!-- Quick Format Pills -->
+        <div class="quick-pills">
+          <span class="quick-label">Quick formats:</span>
+          <button type="button" class="quick-pill active" data-type="audio" data-format="mp3" data-quality="320k">MP3 320k HD</button>
+          <button type="button" class="quick-pill" data-type="audio" data-format="flac" data-quality="best">FLAC Studio</button>
+          <button type="button" class="quick-pill" data-type="video" data-format="mp4" data-quality="1080p">MP4 1080p HD</button>
+          <button type="button" class="quick-pill" data-type="video" data-format="mp4" data-quality="2160p">MP4 4K Ultra</button>
+          <button type="button" class="quick-pill" data-type="audio" data-format="m4a" data-quality="best">M4A AAC</button>
+        </div>
+      </div>
+
+      <!-- Error Alert Box -->
+      <div id="errorAlert" class="alert-box alert-error hidden" role="alert">
+        <div class="alert-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div id="errorMessage" class="alert-content">An error occurred.</div>
+        <button type="button" class="alert-close" onclick="window.app.hideError()">&times;</button>
+      </div>
+    </section>
+
+    <!-- Media Inspector Section (Hidden until analyzed) -->
+    <section id="inspectorSection" class="inspector-section hidden">
+      <div class="inspector-card glass-card">
+        
+        <!-- Left Column: Thumbnail & Preview Player -->
+        <div class="inspector-media">
+          <div class="thumbnail-wrapper">
+            <img id="mediaThumbnail" src="" alt="Media thumbnail" class="media-thumb">
+            <div id="durationBadge" class="duration-badge">00:00</div>
+            <button id="togglePreviewBtn" class="preview-btn" title="Listen / Watch preview">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              <span>Live Preview</span>
+            </button>
+          </div>
+
+          <!-- In-App Player Container -->
+          <div id="previewPlayerContainer" class="preview-player-container hidden">
+            <video id="previewVideoPlayer" controls playsinline class="preview-player"></video>
+            <div class="preview-note">Low-resolution preview for quick verification</div>
+          </div>
+        </div>
+
+        <!-- Right Column: Media Info & Format Configuration -->
+        <div class="inspector-config">
+          <div class="media-meta-header">
+            <h2 id="mediaTitle" class="media-title">Media Title</h2>
+            <div class="media-meta-sub">
+              <span id="mediaUploader" class="meta-item meta-uploader">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span class="uploader-name">Author</span>
+              </span>
+              <span id="mediaViews" class="meta-item meta-views">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <span class="views-count">0 views</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Format Category Tabs -->
+          <div class="format-tabs-wrapper">
+            <div class="format-tabs" role="tablist">
+              <button type="button" id="tabAudio" class="tab-btn active" role="tab" aria-selected="true" onclick="window.app.switchMediaType('audio')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                <span>Audio Format (MP3, FLAC...)</span>
+              </button>
+              <button type="button" id="tabVideo" class="tab-btn" role="tab" aria-selected="false" onclick="window.app.switchMediaType('video')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                <span>Video Format (MP4, MKV...)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Audio Options Panel -->
+          <div id="audioOptionsPanel" class="options-panel">
+            <div class="option-row">
+              <label class="option-label">Audio Codec / Container:</label>
+              <div class="codec-pills">
+                <button type="button" class="chip active" data-codec="mp3" onclick="window.app.setAudioCodec('mp3')">MP3</button>
+                <button type="button" class="chip" data-codec="flac" onclick="window.app.setAudioCodec('flac')">FLAC (Lossless)</button>
+                <button type="button" class="chip" data-codec="wav" onclick="window.app.setAudioCodec('wav')">WAV (Studio)</button>
+                <button type="button" class="chip" data-codec="m4a" onclick="window.app.setAudioCodec('m4a')">M4A (Apple/AAC)</button>
+                <button type="button" class="chip" data-codec="opus" onclick="window.app.setAudioCodec('opus')">OPUS</button>
+              </div>
+            </div>
+
+            <div id="mp3QualityRow" class="option-row">
+              <label class="option-label">Quality / Bitrate:</label>
+              <div class="quality-grid">
+                <label class="radio-card active">
+                  <input type="radio" name="audioBitrate" value="320k" checked onchange="window.app.setAudioBitrate('320k')">
+                  <span class="card-content">
+                    <span class="card-title">320 kbps</span>
+                    <span class="card-desc">High Fidelity HD (Recommended)</span>
+                  </span>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="audioBitrate" value="256k" onchange="window.app.setAudioBitrate('256k')">
+                  <span class="card-content">
+                    <span class="card-title">256 kbps</span>
+                    <span class="card-desc">Very High Quality</span>
+                  </span>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="audioBitrate" value="192k" onchange="window.app.setAudioBitrate('192k')">
+                  <span class="card-content">
+                    <span class="card-title">192 kbps</span>
+                    <span class="card-desc">Standard Quality</span>
+                  </span>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="audioBitrate" value="128k" onchange="window.app.setAudioBitrate('128k')">
+                  <span class="card-content">
+                    <span class="card-title">128 kbps</span>
+                    <span class="card-desc">Compact Size / Eco</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Options Panel -->
+          <div id="videoOptionsPanel" class="options-panel hidden">
+            <div class="option-row">
+              <label class="option-label">Video Resolution:</label>
+              <div id="videoResolutionsGrid" class="quality-grid">
+                <!-- Dynamically populated from available formats -->
+              </div>
+            </div>
+
+            <div class="option-row">
+              <label class="option-label">Video Container:</label>
+              <div class="codec-pills">
+                <button type="button" class="chip active" data-vformat="mp4" onclick="window.app.setVideoFormat('mp4')">MP4 (Universal compatibility)</button>
+                <button type="button" class="chip" data-vformat="mkv" onclick="window.app.setVideoFormat('mkv')">MKV (Multi-track)</button>
+                <button type="button" class="chip" data-vformat="webm" onclick="window.app.setVideoFormat('webm')">WebM</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Time Trimmer Accordion (Cut / Trim) -->
+          <div class="accordion-item">
+            <button type="button" id="trimmerAccordionBtn" class="accordion-header" onclick="window.app.toggleTrimmer()">
+              <div class="acc-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                <span>Built-in Audio/Video Trimmer (Trim &amp; Cut)</span>
+                <span class="badge-feature">Time Saver</span>
+              </div>
+              <span class="acc-icon" id="trimmerAccIcon">&darr;</span>
+            </button>
+            <div id="trimmerPanel" class="accordion-body hidden">
+              <p class="acc-desc">Select only the desired section to avoid downloading the entire video:</p>
+              <div class="trimmer-controls">
+                <div class="time-field">
+                  <label for="trimStartInput">Start (HH:MM:SS or MM:SS):</label>
+                  <input type="text" id="trimStartInput" class="time-input" placeholder="00:00:00" value="">
+                </div>
+                <div class="time-field">
+                  <label for="trimEndInput">End (HH:MM:SS or MM:SS):</label>
+                  <input type="text" id="trimEndInput" class="time-input" placeholder="00:00:00" value="">
+                </div>
+                <button type="button" class="btn-secondary" onclick="window.app.resetTrimmer()">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Advanced Settings: Subtitles & Tags -->
+          <div class="advanced-settings-bar">
+            <div class="setting-item">
+              <label for="subtitleSelect" class="sub-label">Subtitles:</label>
+              <select id="subtitleSelect" class="form-select">
+                <option value="">No subtitles</option>
+              </select>
+            </div>
+            <div class="setting-item toggle-checkbox">
+              <label>
+                <input type="checkbox" id="embedMetaCheck" checked>
+                <span>Embed metadata &amp; HD artwork</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Playlist Items (Visible if playlist) -->
+          <div id="playlistContainer" class="playlist-container hidden">
+            <div class="playlist-header">
+              <div class="playlist-title">
+                <span>Playlist items (<span id="playlistCount">0</span>)</span>
+              </div>
+              <div class="playlist-actions">
+                <button type="button" class="btn-xs" onclick="window.app.toggleAllPlaylist(true)">Check all</button>
+                <button type="button" class="btn-xs" onclick="window.app.toggleAllPlaylist(false)">Uncheck all</button>
+              </div>
+            </div>
+            <div id="playlistList" class="playlist-items-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Main Launch Conversion Button -->
+          <div class="conversion-actions">
+            <button type="button" id="startConvertBtn" class="btn-primary btn-convert" onclick="window.app.startDownload()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="convertBtnLabel">Start Fast Download</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Progress & Download Status Section -->
+    <section id="progressSection" class="progress-section hidden">
+      <div class="progress-card glass-card">
+        <div class="progress-header">
+          <div class="progress-title-wrap">
+            <h3 class="progress-title">Processing in progress...</h3>
+            <div id="progressDetail" class="progress-detail">Initializing stream...</div>
+          </div>
+          <div id="progressPercentBadge" class="progress-badge">0%</div>
+        </div>
+
+        <!-- Animated Progress Bar -->
+        <div class="progress-track">
+          <div id="progressBarFill" class="progress-fill" style="width: 0%;"></div>
+        </div>
+
+        <!-- Speed & ETA Metrics -->
+        <div class="progress-metrics">
+          <div class="metric-item">
+            <span class="metric-label">Speed:</span>
+            <span id="metricSpeed" class="metric-value">-- KiB/s</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">Remaining Time (ETA):</span>
+            <span id="metricEta" class="metric-value">--:--</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">Status:</span>
+            <span id="metricStatus" class="metric-value status-pill">Initializing</span>
+          </div>
+        </div>
+
+        <!-- Download Action when Ready -->
+        <div id="downloadReadyActions" class="download-ready-actions hidden">
+          <a id="finalDownloadLink" href="#" class="btn-primary btn-download-file" download>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span id="downloadBtnText">Save File</span>
+          </a>
+          <button type="button" class="btn-secondary" onclick="window.app.resetAll()">Convert another media</button>
+        </div>
+
+        <!-- Cancel button while downloading -->
+        <div id="cancelActionRow" class="cancel-action-row">
+          <button type="button" id="cancelBtn" class="btn-text-danger" onclick="window.app.cancelCurrentTask()">Cancel download</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Section vs NoTube -->
+    <section id="comparison" class="comparison-section">
+      <div class="section-badge">Exclusive Comparison</div>
+      <h2 class="section-title">Why StreamFab Outclasses NoTube</h2>
+      <p class="section-subtitle">Discover why StreamFab provides an experience lightyears ahead of legacy converters.</p>
+
+      <div class="comparison-table-wrapper glass-card">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th scope="col">Evaluation Metric</th>
+              <th scope="col" class="col-notube">NoTube &amp; Legacy Sites</th>
+              <th scope="col" class="col-streamfab">StreamFab PRO (Our Engine)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Ads &amp; Redirects</strong></td>
+              <td class="text-danger">Intrusive popups, deceptive redirects, malware risks</td>
+              <td class="text-success"><strong>0 Ads, 0 Trackers, 100% Clean</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Max Video Resolution</strong></td>
+              <td class="text-danger">Often capped at 720p or compressed 1080p</td>
+              <td class="text-success"><strong>Up to 4K 60fps &amp; 2K Lossless</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Audio Quality</strong></td>
+              <td class="text-danger">Low-bitrate MP3 (128-192 kbps)</td>
+              <td class="text-success"><strong>True MP3 320 kbps HD &amp; Lossless FLAC</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Built-in Trimmer (Trim &amp; Cut)</strong></td>
+              <td class="text-danger">None (must download the whole video)</td>
+              <td class="text-success"><strong>Precise down-to-the-second trimming</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Playlists &amp; Batch Downloads</strong></td>
+              <td class="text-danger">Impossible or paywalled</td>
+              <td class="text-success"><strong>Full playlists with individual video selection</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Processing Speed</strong></td>
+              <td class="text-danger">Slow, overcrowded server queues</td>
+              <td class="text-success"><strong>Turbo Acceleration (8 simultaneous fragments)</strong></td>
+            </tr>
+            <tr>
+              <td><strong>In-App Media Player</strong></td>
+              <td class="text-danger">No preview available</td>
+              <td class="text-success"><strong>Built-in audio/video player before download</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Subtitles &amp; ID3 Tags</strong></td>
+              <td class="text-danger">No subtitles or metadata</td>
+              <td class="text-success"><strong>Multi-language extraction &amp; HD cover art embedded</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Features Grid -->
+    <section id="features" class="features-section">
+      <div class="section-badge">Cutting-Edge Technology</div>
+      <h2 class="section-title">Engineered for Performance and Simplicity</h2>
+      
+      <div class="features-grid">
+        <div class="feature-card glass-card">
+          <div class="feature-icon icon-speed" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <h3 class="feature-title">Multi-Threaded Turbo Speed</h3>
+          <p class="feature-desc">Downloads fragmented into 8 simultaneous streams to max out bandwidth and prevent platform throttling.</p>
+        </div>
+
+        <div class="feature-card glass-card">
+          <div class="feature-icon icon-audio" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          </div>
+          <h3 class="feature-title">Lossless Studio Sound</h3>
+          <p class="feature-desc">Pure audio extraction in MP3 320k, lossless FLAC, or WAV with artist tags, album, and high-res cover art.</p>
+        </div>
+
+        <div class="feature-card glass-card">
+          <div class="feature-icon icon-scissors" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+          </div>
+          <h3 class="feature-title">Precision Trimming</h3>
+          <p class="feature-desc">Download only a 30-second chorus or a podcast snippet with FFmpeg-powered time trimming.</p>
+        </div>
+
+        <div class="feature-card glass-card">
+          <div class="feature-icon icon-privacy" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3 class="feature-title">Privacy &amp; Security</h3>
+          <p class="feature-desc">Zero tracking cookies, zero third-party ads, zero permanent storage. Processed files are cleaned up after use.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section id="faq" class="faq-section">
+      <div class="section-badge">Frequently Asked Questions</div>
+      <h2 class="section-title">Everything You Need to Know</h2>
+
+      <div class="faq-list">
+        <details class="faq-item glass-card">
+          <summary class="faq-question">Which sites are supported by StreamFab?</summary>
+          <div class="faq-answer">
+            StreamFab supports over 1,000 platforms: YouTube (videos, Shorts, playlists), TikTok (watermark-free), Twitter/X, Instagram (Reels &amp; posts), Facebook, Twitch (clips and VODs), SoundCloud, Vimeo, Dailymotion, and many more.
+          </div>
+        </details>
+
+        <details class="faq-item glass-card">
+          <summary class="faq-question">Why is StreamFab so much faster than NoTube?</summary>
+          <div class="faq-answer">
+            NoTube relies on centralized, overloaded servers with artificial queues designed to display ads. StreamFab leverages an optimized <code>yt-dlp</code> core with 8-thread multi-fragment downloading and direct FFmpeg hardware-accelerated processing.
+          </div>
+        </details>
+
+        <details class="faq-item glass-card">
+          <summary class="faq-question">Can I download only a portion of a video?</summary>
+          <div class="faq-answer">
+            Yes! That is one of StreamFab's signature features. Expand the <strong>Built-in Audio/Video Trimmer</strong> section, enter the start and end timestamps (e.g., <code>01:30</code> to <code>02:45</code>), and only that segment will be extracted and converted.
+          </div>
+        </details>
+
+        <details class="faq-item glass-card">
+          <summary class="faq-question">How do I download an entire playlist?</summary>
+          <div class="faq-answer">
+            Simply paste the playlist link. StreamFab automatically parses all videos, lets you check or uncheck the ones you want, and downloads them in your preferred format.
+          </div>
+        </details>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="container footer-inner">
+      <div class="footer-left">
+        <strong>StreamFab PRO</strong> &mdash; The open-source, high-performance, clean alternative to NoTube.
+      </div>
+      <div class="footer-right">
+        <span>Built with FFmpeg, yt-dlp &amp; FastAPI</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Main JavaScript Application -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
