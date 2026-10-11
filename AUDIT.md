@@ -58,10 +58,12 @@ Locally executed on Linux, Python 3.12.14 and Node.js 24.19.0:
 
 One upstream Starlette test-client deprecation warning remains: its HTTPX compatibility path is deprecated in favor of HTTPX2. Runtime proxy traffic uses HTTPX 0.28.1 and the tested transport adapter; no warning was hidden.
 
+Published validation: [GitHub Actions run 38175919984](https://github.com/Cylae/streamfab/actions/runs/38175919984) completed successfully for application commit `06b794ad4d8cf11395d20b7bc3f78ccc8e5bd574`. All seven jobs passed: Python on Ubuntu and Windows with Python 3.10 and 3.12, JavaScript tests and npm audit, locked Python dependency audit, and Compose configuration/container build/startup health check. This subsequent documentation-only commit records those results without changing the validated application code.
+
 ## Verification limits and operating constraints
 
 - Headless Chromium download failed in this environment with an invalid/truncated browser archive. DOM interaction tests passed, but pixel layout, actual Web Audio decoding and browser codec compatibility were not verified in a rendered browser.
-- Docker/Nginx executables and a Windows host were unavailable locally. The CI workflow adds Linux/Windows Python checks and a container startup check; results must be inspected separately after publication. Systemd/TLS provisioning was reviewed, not deployed here.
+- Docker/Nginx executables and a Windows host were unavailable locally. Published CI verified the Windows/Linux Python matrix and container build/startup as recorded above. Nginx, systemd and TLS provisioning were reviewed, not deployed here.
 - Live YouTube/TikTok/etc. downloads were not used as final acceptance tests. Availability, authentication, DRM restrictions, platform changes and signed CDN URLs are external behavior; the web engine deliberately rejects some downloader protocols.
 - yt-dlp and httpcore internal APIs are used to enforce connection policy. Their versions are pinned; transport tests are required before dependency updates.
 - The system remains single-user and single-worker. Remote operation requires HTTPS and full reverse-proxy authentication. Shared cookies are not multi-tenant credentials; task UUIDs are private capabilities.
