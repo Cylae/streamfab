@@ -15,10 +15,10 @@ import shutil
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import yt_dlp
 from yt_dlp.utils import download_range_func
@@ -70,7 +70,7 @@ def parse_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
 def classify_engine_error(exc: Exception) -> str:
     """Provide clean, human-friendly error diagnosis in English without leaking system internals."""
     msg = str(exc).lower()
-    if "ssrf" in msg or "local or private" in msg or "forbidden" in msg and "ip" in msg or "interdit" in msg:
+    if "ssrf" in msg or "local or private" in msg or ("forbidden" in msg and "ip" in msg):
         return "Security check blocked request: unauthorized destination."
     if "drm" in msg or "protected content" in msg:
         return "This media is protected by DRM and cannot be downloaded."
@@ -86,7 +86,7 @@ def classify_engine_error(exc: Exception) -> str:
         return "This video is not available in your geographical country/region."
     if "timed out" in msg or "timeout" in msg or "connection" in msg:
         return "Connection timed out. Please try again."
-    if "disk" in msg or "espace disque" in msg:
+    if "disk" in msg:
         return "Insufficient disk space on the server."
     return f"An error occurred during extraction or download: {str(exc)}"
 
@@ -402,7 +402,7 @@ class EngineManager:
             if free_space < 200 * 1024 * 1024:
                 raise RuntimeError("Insufficient disk space on the server.")
         except Exception as e:
-            if "insufficient disk space" in str(e).lower() or "espace disque" in str(e).lower():
+            if "insufficient disk space" in str(e).lower():
                 raise
 
         # Enforce strict URL validation & anti-SSRF checks

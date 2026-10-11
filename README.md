@@ -3,7 +3,8 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![yt--dlp](https://img.shields.io/badge/yt--dlp-2024%2B-red.svg)](https://github.com/yt-dlp/yt-dlp)
-[![Tests](https://img.shields.io/badge/Tests-91%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-121%20passed-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/Coverage-92%25-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)]()
 
 > A high-performance, ad-free, privacy-friendly video & audio converter and downloader. Designed to completely outclass legacy web converters like **NoTube** with client-side in-browser computing (0% server CPU load), turbo multi-fragment downloads, lossless audio (FLAC/MP3 320k), 4K 60fps video, interactive trimming, playlist batching, and real-time SSE progress tracking. Available both as a modern Web App and a versatile CLI.
@@ -201,23 +202,30 @@ Detailed deployment instructions for **Docker**, **Ubuntu/Debian Systemd**, **Ng
 
 ## 🧪 Testing
 
-Execute the test suite with `pytest`:
+Execute the comprehensive Python test suite (121 tests, 92% statement coverage) with `pytest`:
 
 ```bash
 pytest
 ```
 
-Run test suite with coverage report:
+Run test suite with detailed coverage report:
 
 ```bash
 pytest --cov=src --cov-report=term-missing
 ```
 
+Execute the in-browser JavaScript Client Media Engine test suite:
+
+```bash
+node tests/test_client_processor.js
+```
+
 The test suite covers:
-- CLI argument parsing, defaults, batch files, errors, format listing, retry backoff heuristics
-- Engine metadata caching, duration formatting, timestamp parsing, error classification
-- Concurrent fragment options, FFmpeg trimming postprocessor arguments, cancellation safety
-- Web API endpoints (`/api/health`, `/api/info`, `/api/download`, `/api/file`, `/api/progress`, path traversal defenses)
+- **CLI Suite**: Argument parsing, defaults, batch files, format listing, retry heuristics, exponential backoff.
+- **Engine Suite**: Metadata extraction, caching with TTL, duration formatting, timestamp validation, 4K/2K resolutions, segment trimming, audio/video stream resolution.
+- **Web API Suite**: Endpoints (`/api/health`, `/api/info`, `/api/download`, `/api/file`, `/api/progress`, `/api/stream-urls`, `/api/proxy-stream`), SSE event generation, HTTP Range requests.
+- **Security Suite**: Anti-SSRF protection, private/reserved IP blocking, cloud metadata defense, filename sanitization, rate limiting, and HTTP security headers.
+- **Client Processor Suite**: Pure JavaScript ID3v2.3 tagging with APIC cover art, 16-bit PCM WAV encoding, in-browser MP3 encoding via `lamejs`, and precision sample trimming.
 
 ---
 

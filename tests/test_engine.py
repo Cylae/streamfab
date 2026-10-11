@@ -347,3 +347,91 @@ def test_resolve_stream_urls(mock_ydl_class):
     assert res["combined_stream_url"] == "https://cdn.com/v360_combined.mp4"
 
 
+def test_classify_engine_error_extended():
+    assert "Security check blocked request" in classify_engine_error(Exception("SSRF blocked: local or private IP"))
+    assert "Insufficient disk space" in classify_engine_error(Exception("No disk space left on device"))
+
+
+def test_metadata_cache_pruning():
+    _METADATA_CACHE.clear()
+    now = time.time()
+    for i in range(105):
+        _METADATA_CACHE[f"https://example.com/old_{i}"] = (now - 400, {"title": f"Old {i}"})
+    assert len(_METADATA_CACHE) == 105
+    # Adding one more triggers pruning of expired entries
+    set_cached_metadata("https://example.com/new_item", {"title": "New Item"})
+    assert len(_METADATA_CACHE) == 1
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_extract_media_info_cached_hit(mock_ydl):
+    mock_instance = mock_ydl.return_value.__enter__.return_value
+    mock_instance.extract_info.return_value = {
+        "id": "cache123",
+        "title": "Cached Title",
+        "uploader": "Uploader",
+        "duration": 60,
+        "formats": [],
+    }
+    url = "https://example.com/cache_hit_test"
+    info1 = extract_media_info(url)
+    assert info1["title"] == "Cached Title"
+    # Call a second time - should hit cache
+    info2 = extract_media_info(url)
+    assert info2["title"] == "Cached Title"
+    assert mock_instance.extract_info.call_count == 1
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_extract_media_info_4k_and_2k(mock_ydl):
+    mock_instance = mock_ydl.return_value.__enter__.return_value
+    mock_instance.extract_info.return_value = {
+        "id": "4k_vid",
+        "title": "4K Video",
+        "duration": 120,
+        "formats": [
+            {"format_id": "313", "vcodec": "vp9", "acodec": "none", "height": 2160, "url": "https://cdn/4k.webm"},
+            {"format_id": "271", "vcodec": "vp9", "acodec": "none", "height": 1440, "url": "https://cdn/2k.webm"},
+            {"format_id": "140", "vcodec": "none", "acodec": "mp4a", "url": "https://cdn/audio.m4a"},
+        ],
+    }
+    info = extract_media_info("https://example.com/4k_test")
+    res_values = [r["value"] for r in info["available_video_resolutions"]]
+    assert "2160p" in res_values
+    assert "1440p" in res_values
+
+
+@patch('engine.shutil.disk_usage')
+def test_execute_download_sync_trim_end_less_than_start(mock_disk):
+    mock_disk.return_value.free = 10 * 1024 * 1024 * 1024
+    mgr = EngineManager()
+    opts = DownloadOptions(
+        url="https://example.com/test",
+        trim_start="00:02:00",
+        trim_end="00:01:00",
+    )
+    task = mgr.create_task(opts)
+    with pytest.raises(ValueError, match="End time must be greater than start time"):
+        mgr._execute_download_sync(task)
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_resolve_stream_urls_fallback_and_qualities(mock_ydl):
+    mock_instance = mock_ydl.return_value.__enter__.return_value
+    mock_instance.extract_info.return_value = {
+        "title": "Fallback Video",
+        "uploader": "Uploader",
+        "duration": 50,
+        "formats": [
+            # Combined format with audio, no audio-only format
+            {"format_id": "18", "url": "https://cdn/combined360.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "ext": "mp4"},
+            {"format_id": "22", "url": "https://cdn/combined720.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 720, "ext": "mp4"},
+        ],
+    }
+    from engine import resolve_stream_urls
+    res = resolve_stream_urls("https://example.com/qualities", video_quality="720p")
+    assert res["audio_stream_url"] == "https://cdn/combined720.mp4"
+    assert res["video_stream_url"] == "https://cdn/combined720.mp4"
+
+
+

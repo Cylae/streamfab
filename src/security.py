@@ -16,7 +16,6 @@ import re
 import socket
 import time
 from collections import defaultdict
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import urllib.parse
 import uuid
@@ -16,7 +15,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -225,7 +224,7 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
 
 
 @app.post("/api/download")
-async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+async def start_download(req: DownloadRequest) -> Dict[str, Any]:
     """Initiate a download task with high performance settings."""
     options = DownloadOptions(
         url=req.url,

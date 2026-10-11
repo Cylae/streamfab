@@ -1,6 +1,7 @@
 import os
 import sys
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
@@ -333,5 +334,44 @@ def test_proxy_stream_mock_success(mock_send):
     assert response.status_code == 200
     assert response.content == b"audio_chunk_data"
     assert response.headers.get("accept-ranges") == "bytes"
+
+
+def test_cancel_invalid_uuid():
+    response = client.post("/api/cancel/not-a-valid-uuid")
+    assert response.status_code == 400
+    assert "Invalid task ID" in response.json()["detail"]
+
+
+def test_download_validation_trim_end_less_than_start():
+    payload = {
+        "url": "https://youtube.com/watch?v=valid_id",
+        "trim_start": "00:02:00",
+        "trim_end": "00:01:00",
+    }
+    response = client.post("/api/download", json=payload)
+    assert response.status_code == 422
+    assert "End time must be greater than start time" in response.text
+
+
+def test_short_url_formats_validation():
+    # Allow youtu.be short form without explicit https://
+    res = client.post("/api/info", json={"url": "youtu.be/dQw4w9WgXcQ"})
+    # It passes url validator (might fail extraction, but validator won't reject with 422)
+    assert res.status_code in (200, 400)  # 400 means valid format but yt-dlp mocked/error
+
+
+def test_file_path_traversal_blocked():
+    task_id = str(uuid.uuid4())
+    opts = DownloadOptions(url="https://example.com/test")
+    task = DownloadTask(task_id, opts)
+    task.progress.status = "completed"
+    # Point outside the task's directory
+    task.progress.file_path = str(Path(__file__).resolve())
+    task.progress.filename = "secret.py"
+    engine.tasks[task_id] = task
+
+    response = client.get(f"/api/file/{task_id}")
+    assert response.status_code in (403, 404)
+
 
 
