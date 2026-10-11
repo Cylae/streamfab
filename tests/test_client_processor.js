@@ -12,7 +12,7 @@ console.log('🧪 Starting StreamFab Client-Side Processor Test Suite...\n');
 
 // 1. Load client source files
 const vendorLame = fs.readFileSync(path.join(__dirname, '../src/static/js/vendor/lame.min.js'), 'utf8');
-const vendorMp4box = fs.readFileSync(path.join(__dirname, '../src/static/js/vendor/mp4box.all.min.js'), 'utf8');
+
 const clientProcessor = fs.readFileSync(path.join(__dirname, '../src/static/js/client-processor.js'), 'utf8');
 
 // 2. Setup browser sandbox environment
@@ -31,6 +31,7 @@ const sandbox = {
   },
   console: console,
   navigator: {},
+  AbortController: global.AbortController,
   TextEncoder: global.TextEncoder,
   TextDecoder: global.TextDecoder,
   Blob: global.Blob,
@@ -51,7 +52,7 @@ vm.createContext(sandbox);
 
 // 3. Execute scripts in sandbox
 vm.runInContext(vendorLame, sandbox);
-vm.runInContext(vendorMp4box, sandbox);
+
 vm.runInContext(clientProcessor, sandbox);
 
 const engine = sandbox.StreamFabClientEngine;
@@ -220,6 +221,7 @@ async function runFallbackTests() {
 
 runAudioTest()
   .then(() => runFallbackTests())
+  .then(() => runAuditRegressions())
   .then(() => {
     console.log('=====================================================');
     console.log('🎉 ALL CLIENT-SIDE PROCESSOR TESTS PASSED (100%)');
@@ -229,4 +231,27 @@ runAudioTest()
     console.error('❌ Test failed:', err);
     process.exit(1);
   });
+
+
+// Audit regressions: strict timestamps, ID3v2.3 Unicode and container fidelity.
+assert.strictEqual(engine.parseTimestampToSeconds('3600.125'), 3600.125);
+for (const text of ['-1', 'Infinity', '00:60', '01:00:60', '86400.001']) {
+  assert.strictEqual(engine.parseTimestampToSeconds(text), null);
+}
+const unicodeTag = engine.buildID3v2Tag({ title: 'Été 日本語' });
+assert.strictEqual(unicodeTag[20], 1); // UTF-16 encoding flag
+assert.strictEqual(new TextDecoder('utf-16le').decode(unicodeTag.subarray(21)), 'Été 日本語');
+
+async function runAuditRegressions() {
+  const noMetadata = await engine.processAudio({ title: 'Hidden title', audio_proxy_url: '/dummy' }, { audioCodec: 'mp3', embedMetadata: false, embedThumbnail: false }, null, null);
+  const tagBytes = new Uint8Array(await noMetadata.blob.arrayBuffer());
+  assert.deepStrictEqual(Array.from(tagBytes.subarray(6, 10)), [0, 0, 0, 0]);
+  await assert.rejects(engine.processAudio({ audio_proxy_url: '/dummy' }, { trimStart: '1', trimEnd: '2' }, 1, 2), /empty or outside/);
+  await assert.rejects(engine.processVideo({ combined_proxy_url: '/dummy', combined_ext: 'webm' }, { embedMetadata: false }, null, null), /Container conversion/);
+  await assert.rejects(engine.processVideo({ combined_proxy_url: '/dummy', combined_ext: 'mp4', video_height: 1080, combined_height: 360 }, { embedMetadata: false }, null, null), /Requested video quality/);
+  const mp4 = await engine.processVideo({ title: 'Exact MP4', combined_proxy_url: '/dummy', combined_ext: 'mp4', video_height: 720, combined_height: 720 }, { embedMetadata: false }, null, null);
+  assert.strictEqual(mp4.filename, 'Exact MP4.mp4');
+  assert.strictEqual(mp4.blob.type, 'video/mp4');
+  console.log('Audit processor regressions passed: timestamps, Unicode, metadata, trim ranges and video fidelity.');
+}
 

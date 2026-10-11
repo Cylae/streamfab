@@ -1,364 +1,94 @@
-# StreamFab Production Deployment Guide
+# StreamFab deployment
 
-This guide provides end-to-end instructions for deploying **StreamFab** in production environments, covering Docker containerization, Bare-Metal Linux VPS with Systemd, Reverse Proxies (Nginx & Caddy), Cloud Platforms (Railway, Render, Fly.io, AWS, DigitalOcean), and security hardening.
+StreamFab is a single-user service with process-local task state. Use one worker, HTTPS, reverse-proxy authentication, and explicit hostnames for any remote installation. A cookie administration token is not a replacement for authenticating the entire web application.
 
----
-
-## 📋 Table of Contents
-
-1. [Architecture & Resource Sizing](#1-architecture--resource-sizing)
-2. [Prerequisites & FFmpeg Verification](#2-prerequisites--ffmpeg-verification)
-3. [Method 1: Docker & Docker Compose (Recommended)](#3-method-1-docker--docker-compose-recommended)
-4. [Method 2: Bare-Metal Linux VPS (Systemd)](#4-method-2-bare-metal-linux-vps-systemd)
-5. [Reverse Proxy Setup (Nginx & Caddy)](#5-reverse-proxy-setup-nginx--caddy)
-6. [Cloud Platform Deployments](#6-cloud-platform-deployments)
-   - [Railway](#railway)
-   - [Render](#render)
-   - [Fly.io](#flyio)
-   - [DigitalOcean / AWS EC2](#digitalocean--aws-ec2)
-7. [Environment Variables & Configuration](#7-environment-variables--configuration)
-8. [Automated Maintenance & yt-dlp Updates](#8-automated-maintenance--yt-dlp-updates)
-9. [Production Security Checklist](#9-production-security-checklist)
-10. [Health Checks & Troubleshooting](#10-health-checks--troubleshooting)
-
----
-
-## 1. Architecture & Resource Sizing
-
-StreamFab supports two compute modes that dramatically dictate your server hardware requirements:
-
-| Operational Mode | Processing Location | Server CPU Usage | Server Disk Usage | Recommended VPS Specs |
-|---|---|---|---|---|
-| **⚡ In-Browser Client Mode (Default)** | User's Browser (Web Audio, lamejs, mp4box) | **~0.0% (Zero Load)** | **0 Bytes** | **1 vCPU, 512 MB RAM** ($4-5/mo) |
-| **Cloud Server Mode (Fallback)** | Host Server (FFmpeg multi-thread) | 50% - 100% during encode | Disk space = video size | **2 - 4 vCPUs, 2 - 4 GB RAM** |
-
-> [!TIP]
-> Because StreamFab defaults to **Client-Side In-Browser Computing**, a minimal $4/month VPS (1 vCPU / 1GB RAM) can easily serve **thousands of concurrent users** without CPU bottlenecks or disk saturation.
-
----
-
-## 2. Prerequisites & FFmpeg Verification
-
-StreamFab requires:
-- **Python**: 3.10, 3.11, or 3.12
-- **FFmpeg**: Compiled with `libmp3lame`, `libx264`, and `libvpx`
-
-### Installing FFmpeg on Linux
+## Docker Compose
 
 ```bash
-# Ubuntu / Debian
-sudo apt update && sudo apt install -y ffmpeg ca-certificates curl
-
-# RHEL / Rocky / Fedora
-sudo dnf install -y ffmpeg ca-certificates curl
-
-# Verify FFmpeg installation and codecs
-ffmpeg -version
-ffmpeg -encoders | grep -E "libmp3lame|libx264"
-```
-
----
-
-## 3. Method 1: Docker & Docker Compose (Recommended)
-
-The easiest and most isolated way to run StreamFab in production is with Docker.
-
-### 3.1 Using Docker Compose
-
-1. Clone repository on your server:
-   ```bash
-   git clone https://github.com/Cylae/streamfab.git /opt/streamfab
-   cd /opt/streamfab
-   ```
-
-2. Launch container with Docker Compose:
-   ```bash
-   docker compose up -d --build
-   ```
-
-3. Verify running state:
-   ```bash
-   docker compose ps
-   docker compose logs -f streamfab
-   ```
-
-4. Check health endpoint:
-   ```bash
-   curl -i http://localhost:8000/api/health
-   ```
-
-### 3.2 Standalone Docker Run
-
-```bash
-# Build production image
-docker build -t streamfab:latest .
-
-# Run with resource limits and auto-restart
-docker run -d \
-  --name streamfab \
-  --restart unless-stopped \
-  -p 8000:8000 \
-  -v streamfab_downloads:/app/downloads \
-  --memory="2g" \
-  --cpus="2.0" \
-  streamfab:latest
-```
-
----
-
-## 4. Method 2: Bare-Metal Linux VPS (Systemd)
-
-For direct host execution without containers (e.g. Ubuntu 22.04 / 24.04 LTS, Debian 12):
-
-### 4.1 Setup Application User & Directory
-
-```bash
-# Create dedicated system user
-sudo useradd -r -s /bin/false -d /var/www/streamfab streamfab
-
-# Clone repository into /var/www/streamfab
-sudo git clone https://github.com/Cylae/streamfab.git /var/www/streamfab
-cd /var/www/streamfab
-
-# Create virtual environment
-sudo python3 -m venv venv
-sudo ./venv/bin/pip install --upgrade pip
-sudo ./venv/bin/pip install -r requirements.txt
-
-# Create downloads folder and assign ownership
-sudo mkdir -p /var/www/streamfab/downloads
-sudo chown -R streamfab:streamfab /var/www/streamfab
-```
-
-### 4.2 Configure Systemd Service
-
-1. Copy the provided service file:
-   ```bash
-   sudo cp /var/www/streamfab/deployment/streamfab.service /etc/systemd/system/streamfab.service
-   ```
-
-2. Reload daemon, enable and start StreamFab:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable streamfab
-   sudo systemctl start streamfab
-   ```
-
-3. Check service status:
-   ```bash
-   sudo systemctl status streamfab
-   ```
-
----
-
-## 5. Reverse Proxy Setup (Nginx & Caddy)
-
-StreamFab serves real-time **Server-Sent Events (SSE)** for download progress and **HTTP Range byte streams** for zero-copy client playback. The reverse proxy must be configured to disable response buffering on these endpoints.
-
-### 5.1 Nginx (Recommended)
-
-1. Copy the optimized configuration template:
-   ```bash
-   sudo cp /var/www/streamfab/deployment/nginx.conf /etc/nginx/sites-available/streamfab.conf
-   ```
-
-2. Edit your domain name in `/etc/nginx/sites-available/streamfab.conf`:
-   ```nginx
-   server_name streamfab.yourdomain.com;
-   ```
-
-3. Enable the site and test configuration:
-   ```bash
-   sudo ln -s /etc/nginx/sites-available/streamfab.conf /etc/nginx/sites-enabled/
-   sudo nginx -t
-   sudo systemctl reload nginx
-   ```
-
-4. Secure with free SSL certificate using Certbot:
-   ```bash
-   sudo apt install -y certbot python3-certbot-nginx
-   sudo certbot --nginx -d streamfab.yourdomain.com
-   ```
-
-#### Key Nginx Configuration Highlights
-- `proxy_buffering off;` on `/api/progress/` ensures SSE events reach browser immediately without buffering delays.
-- `proxy_buffering off;` and `Range` headers on `/api/proxy-stream` ensure smooth audio decoding without storing entire files in proxy buffers.
-- `limit_req_zone` protects against API spam and DDoS attacks.
-
-### 5.2 Caddy Alternative (Automatic HTTPS)
-
-If using Caddy, create `/etc/caddy/Caddyfile`:
-
-```caddy
-streamfab.yourdomain.com {
-    encode gzip zstd
-
-    # Disable buffering for SSE stream
-    @sse path /api/progress/*
-    reverse_proxy @sse 127.0.0.1:8000 {
-        flush_interval -1
-    }
-
-    # Zero-copy stream proxy
-    @proxy_stream path /api/proxy-stream*
-    reverse_proxy @proxy_stream 127.0.0.1:8000 {
-        flush_interval -1
-    }
-
-    # All other routes
-    reverse_proxy 127.0.0.1:8000
-}
-```
-
-Reload Caddy:
-```bash
-sudo systemctl reload caddy
-```
-
----
-
-## 6. Cloud Platform Deployments
-
-### Railway
-
-1. Push your repository to GitHub.
-2. In Railway, click **New Project** &rarr; **Deploy from GitHub repo**.
-3. Railway automatically detects the `Dockerfile` and provisions the container.
-4. Set **Port** to `8000` in Service Settings &rarr; Networking.
-5. Generate a public Railway domain.
-
-### Render
-
-1. Create a new **Web Service** on [Render.com](https://render.com).
-2. Connect your GitHub repository.
-3. Select **Docker** environment (Render uses the included `Dockerfile`).
-4. Set **Port** to `8000`.
-5. Deploy service.
-
-### Fly.io
-
-1. Install Fly CLI:
-   ```bash
-   curl -L https://fly.io/install.sh | sh
-   ```
-2. Authenticate and launch:
-   ```bash
-   fly auth login
-   fly launch --no-deploy
-   ```
-3. Set internal port to 8000 in `fly.toml`:
-   ```toml
-   [[services]]
-     internal_port = 8000
-     protocol = "tcp"
-   ```
-4. Deploy:
-   ```bash
-   fly deploy
-   ```
-
-### DigitalOcean / AWS EC2
-
-1. Provision an **Ubuntu 24.04 LTS** Droplet / t3.small EC2 instance.
-2. Allow inbound ports `80` (HTTP), `443` (HTTPS), and `22` (SSH) in Security Groups / Cloud Firewall.
-3. Follow [Method 1 (Docker Compose)](#3-method-1-docker--docker-compose-recommended) or [Method 2 (Systemd)](#4-method-2-bare-metal-linux-vps-systemd).
-
----
-
-## 7. Environment Variables & Configuration
-
-StreamFab accepts the following environment variables or command-line arguments:
-
-| Variable | CLI Flag | Default | Description |
-|---|---|---|---|
-| `STREAMFAB_HOST` | `--host` | `127.0.0.1` (`0.0.0.0` in Docker) | Network bind interface |
-| `STREAMFAB_PORT` | `--port` | `8000` | Port for the HTTP/REST server |
-| `STREAMFAB_DOWNLOADS_DIR` | N/A | `./downloads` | Root path for temporary task isolation |
-| `STREAMFAB_LOG_LEVEL` | N/A | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-
----
-
-## 8. Automated Maintenance & yt-dlp Updates
-
-Media platforms (YouTube, TikTok, Instagram) frequently update their video delivery mechanisms. Keeping `yt-dlp` updated is essential for continuous 100% download reliability.
-
-### 8.1 Automated Weekly yt-dlp Update Cron
-
-Add a weekly cron job to update `yt-dlp`:
-
-**For Bare-Metal / Systemd:**
-```bash
-# Edit root crontab
-sudo crontab -e
-
-# Add line to update yt-dlp every Sunday at 3:00 AM
-0 3 * * 0 /var/www/streamfab/venv/bin/pip install --upgrade yt-dlp && systemctl restart streamfab
-```
-
-**For Docker:**
-Set up a CI/CD pipeline (e.g. GitHub Actions) or a Watchtower container to rebuild the image weekly:
-```yaml
-# In docker-compose.yml
-services:
-  watchtower:
-    image: containrrr/watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 86400 streamfab_app
-```
-
-### 8.2 Automated Temp Downloads Cleanup Cron
-
-If users trigger downloads using Cloud Server mode, temporary files are cleaned upon download, but orphaned tasks can be pruned daily:
-
-```bash
-# Clean tasks older than 24 hours in downloads directory
-0 4 * * * find /var/www/streamfab/downloads -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} +
-```
-
----
-
-## 9. Production Security Checklist
-
-- [x] **Anti-SSRF Protection**: Built-in IP address resolution blocking private RFC1918, loopback (127.0.0.1), and link-local (169.254.169.254) networks.
-- [x] **Path Traversal Defenses**: Strictly verified UUIDv4 paths prevent `../` attacks on file delivery.
-- [x] **Content-Security-Policy (CSP)**: `default-src 'self'`, `worker-src 'self' blob:`, and strict framing defenses (`X-Frame-Options: SAMEORIGIN`).
-- [x] **Unprivileged User**: Container and systemd execute under unprivileged user (`streamfab` / `www-data`), never as `root`.
-- [x] **Rate Limiting**: Built-in 60 req/min token bucket per IP, plus upstream Nginx burst limiting.
-- [x] **Cloudflare / CDN Note**: If using Cloudflare proxy (orange cloud), navigate to **Rules** &rarr; **Page Rules** and disable **Buffering** for `*streamfab.yourdomain.com/api/*` so SSE streams are delivered in real time.
-
----
-
-## 10. Health Checks & Troubleshooting
-
-### Health Check Endpoint
-```bash
+git clone https://github.com/Cylae/streamfab.git
+cd streamfab
+docker compose up -d --build
 curl -f http://127.0.0.1:8000/api/health
 ```
-Response:
-```json
-{
-  "status": "healthy",
-  "service": "streamfab",
-  "version": "2.0.0",
-  "active_tasks": 0
-}
+
+The port is published on loopback only. Downloads and cookie state have separate named volumes. The image runs as UID 1001 and installs locked runtime dependencies; it does not include tests or credentials from the build context.
+
+For a remote hostname, create a private `.env` file in the project directory:
+
+```dotenv
+STREAMFAB_TRUSTED_HOSTS=localhost,127.0.0.1,streamfab.example.com
 ```
 
-### Common Issues & Solutions
+Generate an administration token without embedding it in shell history:
 
-1. **SSE progress bar does not update until 100%:**
-   - *Cause:* Nginx or Cloudflare is buffering the response stream.
-   - *Fix:* Ensure `proxy_buffering off;` is active on `/api/progress/` in Nginx, and disable proxy buffering in Cloudflare.
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
-2. **FFmpeg missing error:**
-   - *Cause:* FFmpeg is not installed or not in system PATH.
-   - *Fix:* Run `sudo apt install ffmpeg` or check `which ffmpeg`.
+Save its output as `STREAMFAB_ADMIN_TOKEN` in `.env`, restrict permissions (`chmod 600 .env`), and restart Compose. Use the same token in the Cookie Assistant. Keep the application port private; put Nginx or another authenticated HTTPS reverse proxy in front of it.
 
-3. **Port 8000 already bound:**
-   - *Cause:* Another instance is running.
-   - *Fix:* Check with `lsof -i :8000` or `netstat -tlpn | grep 8000` and stop the conflicting process.
+```bash
+docker compose up -d
+```
 
-4. **Stream extraction fails for specific platform:**
-   - *Cause:* The platform updated its API tokens.
-   - *Fix:* Update yt-dlp to latest version with `pip install --upgrade yt-dlp`.
+Back up the state volume only if you intend to retain account sessions; handle those backups as credentials. Removing a container does not remove its named volumes.
+
+## Linux with systemd
+
+```bash
+sudo useradd --system --home-dir /var/www/streamfab --shell /usr/sbin/nologin streamfab
+sudo git clone https://github.com/Cylae/streamfab.git /var/www/streamfab
+sudo python3 -m venv /var/www/streamfab/venv
+sudo /var/www/streamfab/venv/bin/python -m pip install -r /var/www/streamfab/requirements.lock
+sudo cp /var/www/streamfab/deployment/streamfab.service /etc/systemd/system/streamfab.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now streamfab
+sudo systemctl status streamfab
+```
+
+The service user is `streamfab`; the repository and virtual environment can remain root-owned and read-only. systemd creates `/var/lib/streamfab` for state and permits writes there. Configuration goes in `/etc/streamfab.env`, readable only by root:
+
+```dotenv
+STREAMFAB_TRUSTED_HOSTS=localhost,127.0.0.1,streamfab.example.com
+```
+
+Add `STREAMFAB_ADMIN_TOKEN` using a generated secret, then restart the service. `PrivateTmp=true` isolates temporary cookie snapshots. No external cleanup cron is required. Do not delete output directories while downloads run.
+
+## Nginx
+
+The supplied [nginx.conf](deployment/nginx.conf) is an HTTP configuration template; **configure TLS before public exposure**. Replace the example hostname in both Nginx and `STREAMFAB_TRUSTED_HOSTS`. SSE and media proxy buffering are disabled. Static assets have a short cache lifetime because filenames are not content-hashed.
+
+Create the reverse-proxy password file:
+
+```bash
+sudo apt-get install apache2-utils
+sudo htpasswd -c /etc/nginx/streamfab.htpasswd streamfab
+sudo cp deployment/nginx.conf /etc/nginx/conf.d/streamfab.conf
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Add certificate paths and a TLS listener using your organization's certificate provisioning workflow. Keep port 8000 closed to external clients. Forwarded client addresses must come only from trusted proxies: Uvicorn's default loopback trust works for a directly local Nginx process. For containerized proxies, configure a specific trusted proxy address with Uvicorn's `--forwarded-allow-ips` and keep the backend private. Never use `*` for proxy trust on an exposed backend.
+
+## Capacity and operational limits
+
+- The application has 3 simultaneous download workers and bounded extraction/proxy admission. Browser encoding still uses server CPU for extraction and stream delivery, plus network bandwidth.
+- A 2 GiB task budget is checked during download and after media processing. It is not a hard disk quota; reserve enough disk space and use OS/container quotas where required.
+- The supplied Compose configuration sets CPU/memory limits. Add disk quotas and outbound firewall rules suited to the host. Application transport checks complement those controls.
+- FFmpeg is a native parser of untrusted media. Keep system packages patched and run it unprivileged. Its web postprocessing inputs disallow network protocols; isolated containers offer additional protection.
+- Some extractors, live streams, nonstandard ports and external downloader protocols are intentionally unsupported by the web engine. The CLI has a different network policy and should be used only with trusted inputs.
+- File URLs and UUIDs are private capabilities, not multi-user authorization. Do not operate this as a public multi-tenant download service.
+- DNS checks at connection time do not control the host's routing/firewall configuration. Egress rules remain an independent layer.
+
+## Updates and troubleshooting
+
+Review dependency upgrades, refresh the lock, run Python/JavaScript tests, and rebuild/restart. The transport adapter relies on internal yt-dlp/httpcore APIs and must be tested after upgrades. Avoid automatic pip-upgrade cron jobs.
+
+```bash
+curl -f http://127.0.0.1:8000/api/health
+sudo journalctl -u streamfab --since today
+# Or:
+docker compose logs --tail=100 streamfab
+```
+
+HTTP 400 `Invalid host header`: configure the real hostname. HTTP 403 on cookies: supply the token or use loopback if no token is configured. HTTP 503: the bounded admission limit has been reached. SSE delays: check reverse-proxy buffering and connection timeouts. Extraction failures: check platform availability and the reviewed yt-dlp version; session cookies do not guarantee platform acceptance.

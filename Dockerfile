@@ -1,6 +1,6 @@
 # ==============================================================================
 # StreamFab - Production Dockerfile
-# Multi-stage, security-hardened container with FFmpeg & Python 3.12
+# Unprivileged container with FFmpeg & Python 3.12
 # ==============================================================================
 
 FROM python:3.12-slim-bookworm AS base
@@ -9,7 +9,8 @@ FROM python:3.12-slim-bookworm AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    STREAMFAB_STORAGE_DIR=/app/downloads
+    STREAMFAB_STORAGE_DIR=/app/downloads \
+    STREAMFAB_COOKIES_FILE=/app/state/cookies.txt
 
 # Install system dependencies: FFmpeg, curl (for healthcheck), ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,15 +26,15 @@ RUN groupadd -r streamfab && useradd -r -g streamfab -u 1001 -m -d /home/streamf
 WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY requirements.lock .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.lock
 
 # Copy application source code
-COPY --chown=streamfab:streamfab . /app
+COPY --chown=streamfab:streamfab src /app/src
 
 # Create downloads directory with unprivileged ownership
-RUN mkdir -p /app/downloads && chown -R streamfab:streamfab /app
+RUN mkdir -p /app/downloads /app/state && chown -R streamfab:streamfab /app
 
 # Switch to unprivileged user
 USER streamfab

@@ -7,13 +7,17 @@ services:
     container_name: streamfab_app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - STREAMFAB_HOST=0.0.0.0
       - STREAMFAB_PORT=8000
       - STREAMFAB_STORAGE_DIR=/app/downloads
+      - STREAMFAB_COOKIES_FILE=/app/state/cookies.txt
+      - STREAMFAB_TRUSTED_HOSTS=${STREAMFAB_TRUSTED_HOSTS:-localhost,127.0.0.1}
+      - STREAMFAB_ADMIN_TOKEN=${STREAMFAB_ADMIN_TOKEN:-}
     volumes:
       - streamfab_downloads:/app/downloads
+      - streamfab_state:/app/state
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
       interval: 30s
@@ -31,4 +35,7 @@ services:
 
 volumes:
   streamfab_downloads:
+    driver: local
+
+  streamfab_state:
     driver: local

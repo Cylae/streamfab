@@ -1,18 +1,18 @@
 import os
 import sys
 import time
-import pytest
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+import pytest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from security import (
+    RateLimiter,
     SSRFValidationError,
-    is_ip_private_or_reserved,
+    sanitize_filename,
     validate_and_sanitize_url,
     validate_timestamp_strict,
-    sanitize_filename,
-    RateLimiter,
 )
 
 
@@ -138,8 +138,8 @@ class TestFilenameSanitization:
     def test_special_characters_replaced(self):
         res = sanitize_filename('Song "Title": The Best?.mp3')
         assert '"' not in res
-        assert ':' not in res
-        assert '?' not in res
+        assert ":" not in res
+        assert "?" not in res
         assert res == "Song _Title__ The Best_.mp3"
 
     def test_overly_long_filename_truncation(self):
