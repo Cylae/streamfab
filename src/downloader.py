@@ -29,6 +29,11 @@ _NON_RETRYABLE_MARKERS = (
 def classify_error(exc: Exception) -> str:
     """Return a short, human-friendly diagnosis for a download exception."""
     msg = str(exc).lower()
+    if "confirm you’re not a bot" in msg or "confirm you're not a bot" in msg or ("bot" in msg and ("sign in" in msg or "cookies" in msg)):
+        return (
+            "YouTube anti-bot verification triggered ('Sign in to confirm you’re not a bot'). "
+            "YouTube requires session verification. Pass a cookies file with --cookies cookies.txt or switch connection/IP."
+        )
     if "unsupported url" in msg:
         return (
             "This site/URL isn't recognized by any yt-dlp extractor "
@@ -150,6 +155,10 @@ def get_parser() -> argparse.ArgumentParser:
         help="End timestamp for trimming (e.g. 00:02:45)."
     )
     parser.add_argument(
+        "--cookies",
+        help="Path to cookies file (e.g. cookies.txt) to bypass anti-bot verification."
+    )
+    parser.add_argument(
         "--web",
         action="store_true",
         help="Launch the modern StreamFab Web interface (NoTube alternative)."
@@ -184,6 +193,11 @@ def build_ydl_opts(args: argparse.Namespace) -> Dict[str, Any]:
         'logger': RichLogger(),
         'progress_hooks': [progress_hook],
     }
+
+    # Cookies support
+    cookies_path = getattr(args, 'cookies', None)
+    if cookies_path:
+        ydl_opts['cookiefile'] = cookies_path
 
     # Format and quality selection
     if args.extract_audio:

@@ -67,11 +67,31 @@ def parse_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
         return None
 
 
+def get_cookiefile_opt() -> Optional[str]:
+    """Return path to cookie file if configured or present in project root."""
+    custom_cookie = os.getenv("STREAMFAB_COOKIES_FILE")
+    if custom_cookie and Path(custom_cookie).is_file():
+        return str(Path(custom_cookie).resolve())
+    for candidate in [
+        Path.cwd() / "cookies.txt",
+        Path(__file__).resolve().parent.parent / "cookies.txt",
+        Path(__file__).resolve().parent / "cookies.txt",
+    ]:
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return None
+
+
 def classify_engine_error(exc: Exception) -> str:
     """Provide clean, human-friendly error diagnosis in English without leaking system internals."""
     msg = str(exc).lower()
     if "ssrf" in msg or "local or private" in msg or ("forbidden" in msg and "ip" in msg):
         return "Security check blocked request: unauthorized destination."
+    if "confirm you’re not a bot" in msg or "confirm you're not a bot" in msg or ("bot" in msg and ("sign in" in msg or "cookies" in msg)):
+        return (
+            "YouTube anti-bot verification triggered ('Sign in to confirm you’re not a bot'). "
+            "YouTube requires session verification for this connection. Place a cookies.txt file in the project folder to authenticate."
+        )
     if "drm" in msg or "protected content" in msg:
         return "This media is protected by DRM and cannot be downloaded."
     if "unsupported url" in msg or "is not a valid url" in msg:
@@ -80,8 +100,8 @@ def classify_engine_error(exc: Exception) -> str:
         return "Access denied by server (403) — content may require authentication or cookies."
     if "404" in msg or "not found" in msg:
         return "Content not found (404) — check if the link is still valid."
-    if "sign in" in msg or "login" in msg or "private" in msg:
-        return "This video is private or requires a login."
+    if "private" in msg or "members-only" in msg or "login" in msg or "sign in" in msg:
+        return "This video is private, members-only, or requires a login."
     if "geo" in msg or "country" in msg:
         return "This video is not available in your geographical country/region."
     if "timed out" in msg or "timeout" in msg or "connection" in msg:
@@ -129,6 +149,9 @@ def extract_media_info(url: str, fast_mode: bool = True) -> Dict[str, Any]:
         "no_exec": True,
         "socket_timeout": 15,
     }
+    cookie_file = get_cookiefile_opt()
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -428,6 +451,9 @@ class EngineManager:
             "socket_timeout": 20,
             "max_filesize": 2 * 1024 * 1024 * 1024,  # 2 GB limit per download
         }
+        cookie_file = get_cookiefile_opt()
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
 
         # Validate timestamps strictly & configure ultra-efficient segment trimming
         trim_start_sec = validate_timestamp_strict(opts.trim_start) if opts.trim_start else None
@@ -578,6 +604,10 @@ def resolve_stream_urls(
         "no_exec": True,
         "socket_timeout": 15,
     }
+    cookie_file = get_cookiefile_opt()
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(safe_url, download=False)
 
