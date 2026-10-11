@@ -74,7 +74,8 @@ async def extract_bounded(function, *args):
     global _extraction_active
     if _extraction_active >= 4:
         raise HTTPException(
-            status_code=503, detail="Media analysis capacity reached. Please try again later."
+            status_code=503,
+            detail="Analysis/URL validation capacity reached. Please try again later.",
         )
     _extraction_active += 1
     future = asyncio.get_running_loop().run_in_executor(None, function, *args)
@@ -283,11 +284,6 @@ async def get_stream_urls(
 @app.get("/api/proxy-stream", dependencies=[Depends(require_media_user)])
 async def proxy_stream(url: str, request: Request) -> StreamingResponse:
     """Zero-CPU asynchronous stream pass-through with Range support for browser clients."""
-    try:
-        current_url = await asyncio.to_thread(validate_and_sanitize_url, url)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid stream URL: {exc}")
-
     range_header = request.headers.get("range")
     req_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -326,6 +322,10 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
                         await client.aclose()
 
     try:
+        try:
+            current_url = await extract_bounded(validate_and_sanitize_url, url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid stream URL: {exc}") from exc
         client = public_async_client()
         for _ in range(5):
             upstream_req = client.build_request("GET", current_url, headers=req_headers)
@@ -336,7 +336,7 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
                 await resp.aclose()
                 upstream_resp = None
                 next_url = urllib.parse.urljoin(current_url, raw_loc)
-                current_url = await asyncio.to_thread(validate_and_sanitize_url, next_url)
+                current_url = await extract_bounded(validate_and_sanitize_url, next_url)
                 continue
             break
 
@@ -419,7 +419,7 @@ async def start_download(
         playlist_indices=req.playlist_indices,
     )
     try:
-        await asyncio.to_thread(validate_and_sanitize_url, options.url)
+        await extract_bounded(validate_and_sanitize_url, options.url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid or forbidden media URL.") from exc
     try:

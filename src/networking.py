@@ -5,10 +5,13 @@ yt-dlp must include running the transport tests because this adapter uses its
 internal handler API. Proxy environment variables are deliberately ignored.
 """
 
+import asyncio
 import functools
 import http.client
 import socket
+import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import httpcore
 import httpx
@@ -18,6 +21,9 @@ from yt_dlp.networking._urllib import HTTPHandler, RedirectHandler, UrllibRH
 
 from security import SSRFValidationError, is_ip_private_or_reserved, validate_and_sanitize_url
 
+_DNS_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="streamfab-dns")
+_DNS_SLOTS = threading.BoundedSemaphore(16)
+
 
 def public_addresses(host: str, port: int):
     if port not in (80, 443):
@@ -26,6 +32,25 @@ def public_addresses(host: str, port: int):
     if not addresses or any(is_ip_private_or_reserved(item[4][0]) for item in addresses):
         raise SSRFValidationError("SSRF blocked: local or private IP destination.")
     return addresses
+
+
+async def public_addresses_async(host: str, port: int, timeout: float | None):
+    """Bound running AND queued DNS work until its native resolver actually exits."""
+    if not _DNS_SLOTS.acquire(blocking=False):
+        raise httpcore.ConnectError("DNS resolution capacity reached.")
+    try:
+        future = _DNS_POOL.submit(public_addresses, host, port)
+    except BaseException:
+        _DNS_SLOTS.release()
+        raise
+    future.add_done_callback(lambda _: _DNS_SLOTS.release())
+    # Cancelling the HTTP request must not cancel/release a still-running native
+    # resolution or accumulate cancelled work items in the executor's queue.
+    wrapped = asyncio.wrap_future(future)
+    try:
+        return await asyncio.wait_for(asyncio.shield(wrapped), timeout)
+    except asyncio.TimeoutError as exc:
+        raise httpcore.ConnectTimeout("DNS resolution timed out.") from exc
 
 
 def public_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
@@ -120,9 +145,7 @@ class PublicYoutubeDL(yt_dlp.YoutubeDL):
 
 class PublicAsyncBackend(AnyIOBackend):
     async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-        import asyncio
-
-        addresses = await asyncio.to_thread(public_addresses, host, port)
+        addresses = await public_addresses_async(host, port, timeout)
         last_error = None
         for item in addresses:
             try:

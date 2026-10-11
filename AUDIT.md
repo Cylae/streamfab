@@ -93,6 +93,7 @@ Architecture/technology decision: retain Python/yt-dlp/FFmpeg and vanilla JavaSc
 | F11 / Medium | Request memory grew with the number of ASGI messages, including empty fragments. The limit now accumulates a bounded byte buffer instead of message dictionaries | 50,000-fragment tracemalloc stress test and reproducible before/after benchmark; VERIFIED |
 | F12 / Medium | Oversized proxy bodies could end as apparently successful truncated responses; cover fetches bypassed the browser buffer cap. Declared proxy oversize is rejected, streamed overruns fail, cover art is capped at 8 MiB and cancelled on excess | Declared malformed/5,000-digit/oversized lengths; browser declared/streamed buffer-cancellation tests; VERIFIED |
 | F13 / Low | Empty URL credentials disagreed between entry points; malformed Origin raised a server error | Consistent userinfo rejection and explicit HTTP 403 Origin test; VERIFIED |
+| F15 / Medium | URL validation submitted DNS work before checking proxy/task capacity; connection DNS could leave native work after HTTP cancellation. Validation now uses the bounded extraction admission pool, proxy admission precedes DNS, and a four-worker/sixteen-job resolver holds reservations until native work finishes | Two pre-fix admission regressions failed; cancellation of sixteen blocked jobs retains capacity; a seventeenth is rejected; timed-out DNS retains its reservation; VERIFIED |
 | F14 / Medium | Default POSIX output directories could be read/enumerated by other OS users. Storage/task directories now use owner-only modes | POSIX task permission assertion and clean server startup; Windows ACL limitation remains documented; VERIFIED for POSIX |
 
 ### Measured before/after
@@ -108,14 +109,14 @@ Architecture/technology decision: retain Python/yt-dlp/FFmpeg and vanilla JavaSc
 
 ### Final evidence and maintainability gate
 
-The final source snapshot was copied into an empty directory, a new virtual environment was created, and runtime/development dependencies were installed from the repository declarations. Node dependencies were installed by `npm ci --ignore-scripts` without the project's existing node_modules. No browser/vendor or upstream warning was suppressed. One earlier clean-copy formatting check correctly rejected a stale, pre-format script snapshot; it was recopied from the final formatted source and the checks were rerun.
+The final source snapshot was copied into an empty directory, a new virtual environment was created, and runtime/development dependencies were installed from the repository declarations. Node dependencies were installed by `npm ci --ignore-scripts` without the project's existing node_modules. No browser/vendor or upstream warning was suppressed. Two further regressions reproduced admission-before-DNS defects during the final red-team review; completion was suspended and bounded admission/resolver work was implemented and tested before restarting validation. One earlier clean-copy formatting check correctly rejected a stale, pre-format script snapshot; it was recopied from the final formatted source and the checks were rerun.
 
 | Area | Verification | Result / evidence strength |
 |---|---|---|
 | Requirements/maintainability | Component ownership, alternatives, invariants, contracts, debugging, rollback and traceability | Documented in ARCHITECTURE; supported by source review, not an actual third-party developer onboarding study |
 | Formatting/lint | `python -m ruff check src tests scripts`; `python -m ruff format --check src tests scripts` | PASS; clean environment |
-| Python behavior | Full offline/regression/media suite in a new venv | 216 tests passed on Linux Python 3.12; 24 second-pass cases; proven for tested inputs |
-| Statement coverage | `pytest --cov=src --cov-report=json` | 89.95% (1,369 / 1,522); no correctness guarantee |
+| Python behavior | Full offline/regression/media suite in a new venv | 220 tests passed on Linux Python 3.12; 28 second-pass cases; proven for tested inputs |
+| Statement coverage | `pytest --cov=src --cov-report=json` | 90.06% (1,387 / 1,540); no correctness guarantee |
 | JavaScript | Shipped processor, synthetic actual MP3, jsdom UI, overlapping operation and byte-budget regressions | PASS from fresh npm install; rendered browser remains NOT VERIFIED |
 | Media integration | Actual MP3/WAV/video trimming and requested MP4/MKV remux fixtures | PASS; independent duration/bitrate/title/container oracles |
 | Resource/failure behavior | Fragment stress, cancellation contention, proxy setup cancellation/failure, bounded subscribers and cache | PASS for these scenarios; quotas and cooperative-cancellation limitations still apply |

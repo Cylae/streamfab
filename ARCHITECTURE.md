@@ -14,7 +14,7 @@ Decision: **retain Python and vanilla JavaScript, refactor the defective boundar
 
 | Alternative | Assessment | Decision basis |
 |---|---|---|
-| Python + yt-dlp + FFmpeg | Direct supported extraction/postprocessor integration; async API with bounded worker offload; native FFmpeg handles conversion | Retain. Actual integration and regression fixtures provide evidence. Python CPU performance is not claimed to dominate conversion |
+| Python + yt-dlp + FFmpeg | Direct supported extraction/postprocessor integration; async API with bounded worker and resolver offload; native FFmpeg handles conversion | Retain. Actual integration and regression fixtures provide evidence. Python CPU performance is not claimed to dominate conversion |
 | Rust or Go backend | Could provide stronger compile-time constraints or simpler process isolation; would still invoke yt-dlp/FFmpeg or require replacing extraction | No rewrite. No measured Python bottleneck justifies migration and platform-compatibility risk |
 | Node/TypeScript backend | Could share frontend types; would still need Python extraction or a maintained equivalent | No replacement. Adds a second production runtime without solving the confirmed defects |
 | SPA framework or frontend TypeScript migration | May help a larger application; current UI is one screen and tests run against actual DOM bindings | Keep the current frontend. Fix operation lifetimes and escaping directly; revisit if UI complexity materially grows |
@@ -28,7 +28,7 @@ These are code-review assessments, not comparative performance benchmarks. Switc
 | `src/downloader.py` | CLI entrypoint, option selection, retry policy, Uvicorn startup | CLI accepts trusted-owner URLs; web startup is loopback by default |
 | `src/web_server.py` | HTTP validation/authentication, admission, SSE, checked proxy, file delivery | Capture cookie permission before offloading or queueing |
 | `src/security.py` | URL/IP/timestamp/filename rules, request body limits, rate limits, origin/CSP headers | Reject malformed input before media processing |
-| `src/networking.py` | yt-dlp urllib and HTTPX/httpcore network adapters | Resolve and validate actual destinations; connect to checked IPs; preserve original TLS hostname |
+| `src/networking.py` | yt-dlp urllib and HTTPX/httpcore network adapters | Resolve and validate actual destinations; bounded native DNS workers/queue; connect to checked IPs; preserve TLS hostname |
 | `src/engine.py` | Cookie snapshots, metadata cache, tasks, concurrency, conversion and retention | Worker threads publish through guarded state transitions; complete records are atomic |
 | `src/static/js/app.js` | DOM state, request dispatch, processing choice, SSE and downloads | Older asynchronous operations cannot reset a newer operation |
 | `src/static/js/client-processor.js` | Bounded stream buffering, Web Audio, MP3/WAV encoding, ID3, MP4 copying | Each call owns its AbortController; compatible output only; bounded cover art |
@@ -59,6 +59,7 @@ Remote deployments still require HTTPS and full reverse-proxy authentication. Th
 | Stateful downloads and SSE run in one process | Keep bounded in-memory state and a semaphore. Alternative: database/job broker and multiple workers | Simpler for a single-user application; multi-worker/multi-tenant operation requires a designed replacement, not a changed launch flag |
 | Authentication and cookie installation can change while work is queued | Capture a boolean account-access capability at admission; isolate jars and cache generations. Alternative: check whichever cookie file exists when a worker starts | Anonymous work cannot acquire later-installed credentials; already authorized snapshots may finish after cookie removal |
 | Cancellation races worker progress and client decoding | Atomic terminal server state; per-call browser controller; operation IDs in DOM handling | Cancellation is terminal at the state boundary, but blocking external/native operations remain cooperative |
+| HTTP cancellation cannot terminate a native DNS resolver | Share bounded admission for initial URL checks; connection resolution uses four workers and sixteen held job reservations. Alternatives: unbounded thread offload or release on HTTP cancellation | Resolver work stays bounded through timeout/cancellation; native OS lookup may continue until its own timeout |
 | HTTP chunk count can far exceed body byte count | Accumulate bytes into one bounded buffer, not a list of ASGI messages | Memory depends on byte budget; repeated empty/tiny fragments do not accumulate message objects |
 | CLI combined streams bypass yt-dlp's merger | Add explicit remuxing for requested MP4/MKV containers | Unsupported codec/container combinations fail rather than falsely claim a requested format |
 

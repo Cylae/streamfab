@@ -12,6 +12,7 @@ import uuid
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpcore
 import pytest
 import yt_dlp
 from fastapi import HTTPException
@@ -19,6 +20,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 import engine
+import networking
 import web_server
 from downloader import build_ydl_opts, get_parser
 from engine import DownloadOptions, DownloadTask, EngineManager
@@ -392,3 +394,89 @@ def test_cli_remux_produces_requested_container_with_real_combined_media(
     )
     assert format_name in probe["format"]["format_name"].split(",")
     assert converted["filepath"].endswith("." + target)
+
+
+def test_download_validation_cannot_bypass_extraction_admission(monkeypatch):
+    monkeypatch.setattr(web_server, "_extraction_active", 4)
+    with (
+        patch("web_server.validate_and_sanitize_url") as validate,
+        TestClient(
+            web_server.app, base_url="http://localhost", client=("127.0.0.1", 50000)
+        ) as client,
+    ):
+        response = client.post("/api/download", json={"url": "https://public.example"})
+    assert response.status_code == 503
+    validate.assert_not_called()
+
+
+def test_proxy_capacity_is_checked_before_dns_resolution(monkeypatch):
+    monkeypatch.setattr(web_server, "_proxy_active", 16)
+
+    async def check():
+        with patch("web_server.validate_and_sanitize_url") as validate:
+            with pytest.raises(HTTPException) as error:
+                await web_server.proxy_stream(
+                    "https://public.example", Request({"type": "http", "headers": []})
+                )
+            assert error.value.status_code == 503
+            validate.assert_not_called()
+
+    asyncio.run(check())
+
+
+def test_cancelled_dns_keeps_native_work_bounded_until_resolution_finishes():
+    released = threading.Event()
+    workers = []
+
+    def blocked_dns(*args):
+        workers.append(threading.get_ident())
+        assert released.wait(timeout=5)
+        return []
+
+    async def check():
+        with patch("networking.public_addresses", side_effect=blocked_dns):
+            pending = [
+                asyncio.create_task(networking.public_addresses_async("public.example", 443, None))
+                for _ in range(16)
+            ]
+            try:
+                await asyncio.sleep(0.05)
+                for resolution in pending:
+                    resolution.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                with pytest.raises(httpcore.ConnectError, match="capacity"):
+                    await networking.public_addresses_async("another.example", 443, None)
+                assert len(set(workers)) <= 4
+            finally:
+                released.set()
+                for _ in range(100):
+                    if networking._DNS_SLOTS._value == 16:
+                        break
+                    await asyncio.sleep(0.01)
+                assert networking._DNS_SLOTS._value == 16
+
+    asyncio.run(check())
+
+
+def test_dns_timeout_preserves_native_work_accounting():
+    released = threading.Event()
+
+    def blocked_dns(*args):
+        assert released.wait(timeout=5)
+        return []
+
+    async def check():
+        with patch("networking.public_addresses", side_effect=blocked_dns):
+            try:
+                with pytest.raises(httpcore.ConnectTimeout, match="timed out"):
+                    await networking.public_addresses_async("public.example", 443, 0.01)
+                assert networking._DNS_SLOTS._value == 15
+            finally:
+                released.set()
+                for _ in range(100):
+                    if networking._DNS_SLOTS._value == 16:
+                        break
+                    await asyncio.sleep(0.01)
+                assert networking._DNS_SLOTS._value == 16
+
+    asyncio.run(check())
