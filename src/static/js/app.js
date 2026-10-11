@@ -576,7 +576,7 @@
           badge.classList.add('cloud');
         }
         if (desc) {
-          desc.textContent = 'Legacy server-side FFmpeg processing mode (recommended only for low-spec older devices).';
+          desc.textContent = 'FFmpeg on the server supports every output format, playlists, subtitles and video trimming.';
         }
         if (cpuMetric) {
           cpuMetric.textContent = 'Active (Server FFmpeg)';
@@ -633,7 +633,7 @@
       this.dom.cancelActionRow.classList.remove('hidden');
       this.dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-      // In-Browser Client-Side Processing (0% Server CPU)
+      // Browser encoding still uses server extraction and network delivery.
       if (this.state.useClientCompute && window.StreamFabClientEngine && !payload.playlist_indices && !payload.subtitle_lang && (payload.media_type !== 'audio' || (payload.audio_format === 'mp3' || (payload.audio_format === 'wav' && !payload.embed_metadata)))) {
         try {
           if (this.dom.metricCpu) {
@@ -793,10 +793,6 @@
       try {
         await fetch(`/api/cancel/${taskId}`, { method: 'POST' });
       } catch (e) {}
-      if (this.state.eventSource) {
-        this.state.eventSource.close();
-      }
-      this.resetAll();
     }
 
     /* ---------------- Cookie Session Assistant Logic ---------------- */

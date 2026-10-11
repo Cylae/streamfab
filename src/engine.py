@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -42,14 +43,18 @@ if storage_env:
     DOWNLOADS_DIR = Path(storage_env).resolve()
 else:
     DOWNLOADS_DIR = Path(tempfile.gettempdir()) / "streamfab_downloads"
-DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+if os.name != "nt":
+    DOWNLOADS_DIR.chmod(0o700)
 
-# In-memory metadata cache (URL -> (timestamp, info_dict))
-_METADATA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+# Credential-separated metadata cache, using monotonic TTLs and jar generations.
+_METADATA_CACHE: dict[tuple[str, bool], tuple[float, dict[str, Any]]] = {}
+_CACHE_GENERATION = 0
 CACHE_TTL_SECONDS = 300  # 5 minutes
 TASK_RETENTION_SECONDS = 3600  # 1 hour auto-cleanup
 MAX_TASKS = 100
 _CACHE_LOCK = threading.Lock()
+_COOKIE_LOCK = threading.RLock()
 MAX_CONCURRENT_DOWNLOADS = 3  # Protect server resources against DoS
 
 
@@ -85,18 +90,10 @@ COOKIES_FILE_PATH = (Path(__file__).resolve().parent.parent / "cookies.txt").res
 
 
 def get_cookiefile_opt() -> str | None:
-    """Return path to cookie file if configured or present in project root."""
-    custom_cookie = os.getenv("STREAMFAB_COOKIES_FILE")
-    if custom_cookie and Path(custom_cookie).is_file():
-        return str(Path(custom_cookie).resolve())
-    for candidate in [
-        COOKIES_FILE_PATH,
-        Path.cwd() / "cookies.txt",
-        Path(__file__).resolve().parent / "cookies.txt",
-    ]:
-        if candidate.is_file():
-            return str(candidate.resolve())
-    return None
+    """An explicit configuration is authoritative, even when its file is absent."""
+    with _COOKIE_LOCK:
+        candidate = cookie_write_path()
+        return str(candidate.resolve()) if candidate.is_file() else None
 
 
 def get_cookies_status() -> dict[str, Any]:
@@ -166,36 +163,47 @@ def save_cookies_text(content: str) -> dict[str, Any]:
             raise ValueError("Invalid Netscape cookie file.") from exc
         if not list(jar):
             raise ValueError("Cookie file contains no cookies.")
-        os.replace(temp_name, destination)
-        with _CACHE_LOCK:
-            _METADATA_CACHE.clear()
+        with _COOKIE_LOCK:
+            os.replace(temp_name, destination)
+            invalidate_metadata_cache()
     finally:
         Path(temp_name).unlink(missing_ok=True)
     return get_cookies_status()
 
 
 def delete_cookies_file() -> bool:
-    """Delete only the configured cookie file, preserving unrelated fallback files."""
-    destination = Path(get_cookiefile_opt() or cookie_write_path())
-    existed = destination.is_file()
-    destination.unlink(missing_ok=True)
+    """Delete exactly the configured jar and invalidate in-flight cache writes."""
+    with _COOKIE_LOCK:
+        destination = cookie_write_path()
+        existed = destination.is_file()
+        destination.unlink(missing_ok=True)
+        invalidate_metadata_cache()
+        return existed
+
+
+def invalidate_metadata_cache() -> None:
+    global _CACHE_GENERATION
     with _CACHE_LOCK:
+        _CACHE_GENERATION += 1
         _METADATA_CACHE.clear()
-    return existed
 
 
 @contextmanager
-def web_ydl(options):
+def web_ydl(options, *, use_cookies=True):
     """Isolate each cookie jar so parallel downloads never overwrite credentials."""
     opts = dict(options, proxy="", hls_prefer_native=True)
-    cookie_path = get_cookiefile_opt()
     temporary = None
     try:
-        if cookie_path:
-            fd, temporary = tempfile.mkstemp(prefix="streamfab-cookie-")
-            with os.fdopen(fd, "wb") as f:
-                f.write(Path(cookie_path).read_bytes())
+        with _COOKIE_LOCK:
+            cookie_path = get_cookiefile_opt() if use_cookies else None
+            if cookie_path:
+                fd, temporary = tempfile.mkstemp(prefix="streamfab-cookie-")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(Path(cookie_path).read_bytes())
+        if temporary:
             opts["cookiefile"] = temporary
+        else:
+            opts.pop("cookiefile", None)
         with PublicYoutubeDL(opts) as ydl:
             yield ydl
     finally:
@@ -236,36 +244,45 @@ def classify_engine_error(exc: Exception) -> str:
     return "Media processing failed. Check the server logs for details."
 
 
-def get_cached_metadata(url: str) -> dict[str, Any] | None:
+def get_cached_metadata(url: str, use_cookies: bool = True) -> dict[str, Any] | None:
     """Return cached metadata if still valid."""
     with _CACHE_LOCK:
-        entry = _METADATA_CACHE.get(url)
+        entry = _METADATA_CACHE.get((url, use_cookies))
         if entry:
             cached_time, data = entry
-            if time.time() - cached_time < CACHE_TTL_SECONDS:
+            if time.monotonic() - cached_time < CACHE_TTL_SECONDS:
                 return deepcopy(data)
-            _METADATA_CACHE.pop(url, None)
+            _METADATA_CACHE.pop((url, use_cookies), None)
     return None
 
 
-def set_cached_metadata(url: str, data: dict[str, Any]) -> None:
+def set_cached_metadata(
+    url: str, data: dict[str, Any], use_cookies: bool = True, generation: int | None = None
+) -> None:
     """Hard-bound the cache, including when all entries are still fresh."""
-    now = time.time()
+    now = time.monotonic()
+    key = (url, use_cookies)
     with _CACHE_LOCK:
+        if generation is not None and generation != _CACHE_GENERATION:
+            return
         expired = [k for k, (t, _) in _METADATA_CACHE.items() if now - t >= CACHE_TTL_SECONDS]
-        for key in expired:
-            _METADATA_CACHE.pop(key, None)
-        if url not in _METADATA_CACHE and len(_METADATA_CACHE) >= 100:
+        for expired_key in expired:
+            _METADATA_CACHE.pop(expired_key, None)
+        if key not in _METADATA_CACHE and len(_METADATA_CACHE) >= 100:
             _METADATA_CACHE.pop(next(iter(_METADATA_CACHE)))
-        _METADATA_CACHE[url] = (now, deepcopy(data))
+        _METADATA_CACHE[key] = (now, deepcopy(data))
 
 
-def extract_media_info(url: str, fast_mode: bool = True) -> dict[str, Any]:
+def extract_media_info(
+    url: str, fast_mode: bool = True, use_cookies: bool = True
+) -> dict[str, Any]:
     """Extract metadata, formats, preview streams, and subtitle tracks safely."""
     # Enforce strict URL validation & anti-SSRF checks
     safe_url = validate_and_sanitize_url(url)
 
-    cached = get_cached_metadata(safe_url)
+    with _CACHE_LOCK:
+        generation = _CACHE_GENERATION
+    cached = get_cached_metadata(safe_url, use_cookies)
     if cached:
         return cached
 
@@ -280,7 +297,7 @@ def extract_media_info(url: str, fast_mode: bool = True) -> dict[str, Any]:
     }
 
     try:
-        with web_ydl(ydl_opts) as ydl:
+        with web_ydl(ydl_opts, use_cookies=use_cookies) as ydl:
             info = ydl.extract_info(safe_url, download=False)
     except Exception as e:
         raise ValueError(classify_engine_error(e)) from e
@@ -432,13 +449,14 @@ def extract_media_info(url: str, fast_mode: bool = True) -> dict[str, Any]:
                 )
         result["subtitles"] = subtitles_list
 
-    set_cached_metadata(safe_url, result)
+    set_cached_metadata(safe_url, result, use_cookies, generation)
     return result
 
 
 @dataclass
 class DownloadOptions:
     url: str
+    use_cookies: bool = True  # Captured authorization; never upgraded while queued.
     media_type: str = "audio"  # 'audio' or 'video'
     audio_format: str = "mp3"  # mp3, m4a, flac, wav, opus
     audio_quality: str = "320k"  # 320k, 256k, 192k, 128k, best
@@ -485,7 +503,7 @@ class DownloadTask:
         self._running = False
         self._cancel_requested = False
         self._output_dir = (DOWNLOADS_DIR / task_id).resolve()
-        self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def cancel(self) -> None:
         with self._notification_lock:
@@ -497,22 +515,41 @@ class DownloadTask:
             self.notify_subscribers()
 
     def add_subscriber(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=1)
-        try:
-            self._subscriber_loops[q] = asyncio.get_running_loop()
-        except RuntimeError:
-            self._subscriber_loops[q] = None
-        self.subscribers.append(q)
-        q.put_nowait(self.to_dict())
-        return q
+        with self._notification_lock:
+            if len(self.subscribers) >= 32:
+                raise RuntimeError("Progress subscriber capacity reached.")
+            q: asyncio.Queue = asyncio.Queue(maxsize=1)
+            try:
+                self._subscriber_loops[q] = asyncio.get_running_loop()
+            except RuntimeError:
+                self._subscriber_loops[q] = None
+            self.subscribers.append(q)
+            q.put_nowait(self.to_dict())
+            return q
 
     def remove_subscriber(self, q: asyncio.Queue) -> None:
-        if q in self.subscribers:
-            self.subscribers.remove(q)
+        with self._notification_lock:
+            if q in self.subscribers:
+                self.subscribers.remove(q)
             self._subscriber_loops.pop(q, None)
             self._latest_notifications.pop(q, None)
+            self._pending_notifications.discard(q)
+
+    def update_progress(self, **fields) -> bool:
+        """Make terminal transitions and worker updates atomic with cancellation."""
+        with self._notification_lock:
+            if self.progress.status in ("completed", "error", "cancelled"):
+                return False
+            for name, value in fields.items():
+                setattr(self.progress, name, value)
+            self.notify_subscribers()
+            return True
 
     def notify_subscribers(self) -> None:
+        with self._notification_lock:
+            self._notify_subscribers_locked()
+
+    def _notify_subscribers_locked(self) -> None:
         if self.progress.status in ("completed", "error", "cancelled") and self.finished_at is None:
             self.finished_at = datetime.now(timezone.utc)
         data = self.to_dict()
@@ -535,11 +572,20 @@ class DownloadTask:
                         self._latest_notifications[q] = data
                         if q not in self._pending_notifications:
                             self._pending_notifications.add(q)
-                            loop.call_soon_threadsafe(deliver, q)
+                            try:
+                                loop.call_soon_threadsafe(deliver, q)
+                            except RuntimeError:
+                                self.remove_subscriber(q)
+                    else:
+                        self.remove_subscriber(q)
                 else:
                     deliver(q)
 
     def to_dict(self) -> dict[str, Any]:
+        with self._notification_lock:
+            return self._to_dict_locked()
+
+    def _to_dict_locked(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "status": self.progress.status,
@@ -631,15 +677,12 @@ class EngineManager:
                 await loop.run_in_executor(None, self._execute_download_sync, task)
             except Exception as exc:
                 if task._cancel_requested:
-                    task.progress.status = "cancelled"
-                    task.notify_subscribers()
                     return
                 logging.getLogger(__name__).exception("Download task failed")
-                task.progress.status = "error"
                 diagnosis = classify_engine_error(exc)
-                task.progress.error_message = diagnosis
-                task.progress.detail = f"Error: {diagnosis}"
-                task.notify_subscribers()
+                task.update_progress(
+                    status="error", error_message=diagnosis, detail=f"Error: {diagnosis}"
+                )
             finally:
                 task._running = False
 
@@ -658,9 +701,8 @@ class EngineManager:
         if task._cancel_requested:
             return
 
-        task.progress.status = "downloading"
-        task.progress.detail = "Initializing ultra-fast stream..."
-        task.notify_subscribers()
+        if not task.update_progress(status="downloading", detail="Initializing media download..."):
+            return
 
         ydl_opts: dict[str, Any] = {
             "paths": {"home": str(out_dir)},
@@ -777,37 +819,34 @@ class EngineManager:
                     raise RuntimeError("Download exceeded disk storage limits.")
             status = d.get("status")
             if status == "downloading":
-                task.progress.status = "downloading"
                 raw_percent = d.get("_percent_str", "0%").replace("%", "").strip()
                 try:
-                    task.progress.percent = max(0.0, min(100.0, float(raw_percent)))
+                    percent = max(0.0, min(100.0, float(raw_percent)))
                 except ValueError:
-                    task.progress.percent = 0.0
-
-                task.progress.speed = d.get("_speed_str", "Calculating...")
-                task.progress.eta = d.get("_eta_str", "00:00")
-                task.progress.downloaded_bytes = d.get("downloaded_bytes", 0)
-                task.progress.total_bytes = (
-                    d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                    percent = 0.0
+                speed = d.get("_speed_str", "Calculating...")
+                eta = d.get("_eta_str", "00:00")
+                task.update_progress(
+                    status="downloading",
+                    percent=percent,
+                    speed=speed,
+                    eta=eta,
+                    downloaded_bytes=d.get("downloaded_bytes", 0),
+                    total_bytes=d.get("total_bytes") or d.get("total_bytes_estimate") or 0,
+                    detail=f"Downloading: {percent:.1f}% ({speed}) - ETA: {eta}",
                 )
-                task.progress.detail = f"Downloading: {task.progress.percent:.1f}% ({task.progress.speed}) - ETA: {task.progress.eta}"
-                task.notify_subscribers()
             elif status == "finished":
-                task.progress.status = "converting"
-                task.progress.percent = 99.0
-                task.progress.detail = "High-quality conversion & finalization via FFmpeg..."
-                task.notify_subscribers()
+                task.update_progress(
+                    status="converting", percent=99.0, detail="Conversion via FFmpeg..."
+                )
 
         ydl_opts["progress_hooks"] = [progress_hook]
 
         # Execute download with yt_dlp
-        with web_ydl(ydl_opts) as ydl:
+        with web_ydl(ydl_opts, use_cookies=opts.use_cookies) as ydl:
             retcode = ydl.download([opts.url])
 
         if task._cancel_requested:
-            task.progress.status = "cancelled"
-            task.progress.detail = "Download cancelled by user."
-            task.notify_subscribers()
             return
 
         if retcode != 0:
@@ -830,6 +869,8 @@ class EngineManager:
         if trim_start_sec is not None or trim_end_sec is not None:
             for media_file in files_to_serve:
                 self._trim_local_file(task, media_file, trim_start_sec or 0, trim_end_sec)
+        if sum(f.stat().st_size for f in files_to_serve) > 2 * 1024**3:
+            raise RuntimeError("Processed output exceeded disk storage limits.")
 
         # If multiple media files were downloaded (e.g. playlist batch), bundle into a zip
         if len(files_to_serve) > 1:
@@ -864,6 +905,29 @@ class EngineManager:
 
     def _trim_local_file(self, task, media_file, start, end):
         """Trim downloaded media locally, never sending an untrusted URL to FFmpeg."""
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "file,pipe",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(media_file),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        try:
+            duration = float(json.loads(probe.stdout)["format"]["duration"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError("Cannot determine media duration for trimming.") from exc
+        if not math.isfinite(duration) or start >= duration:
+            raise ValueError("Trim range is outside the media duration.")
         output = media_file.with_name("trimmed-" + media_file.name)
         args = [
             "ffmpeg",
@@ -878,7 +942,18 @@ class EngineManager:
         ]
         if end is not None:
             args += ["-t", str(end - start)]
-        args += ["-map", "0", "-map_metadata", "0", str(output)]
+        args += ["-map", "0", "-map_metadata", "0", "-c:s", "copy"]
+        if media_file.suffix.lower() == ".mp3":
+            bitrate = task.options.audio_quality
+            args += [
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                bitrate if bitrate != "best" else "320k",
+                "-c:v",
+                "copy",
+            ]
+        args += [str(output)]
         try:
             with tempfile.TemporaryFile() as errors:
                 with subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=errors) as proc:
@@ -902,6 +977,7 @@ def resolve_stream_urls(
     video_quality: str = "best",
     video_format: str = "mp4",
     audio_format: str = "mp3",
+    use_cookies: bool = True,
 ) -> dict[str, Any]:
     """Resolve direct CDN stream URLs for zero-server-CPU client-side processing."""
     safe_url = validate_and_sanitize_url(url)
@@ -914,7 +990,7 @@ def resolve_stream_urls(
         "socket_timeout": 15,
     }
 
-    with web_ydl(ydl_opts) as ydl:
+    with web_ydl(ydl_opts, use_cookies=use_cookies) as ydl:
         info = ydl.extract_info(safe_url, download=False)
 
     if not info:

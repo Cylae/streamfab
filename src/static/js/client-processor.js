@@ -2,7 +2,8 @@
  * StreamFab Client-Side Media Processor
  *
  * Executes 100% of the media computation (decoding, trimming, audio encoding,
- * ID3 tagging, cover art embedding, and MP4 remuxing) inside the user's browser.
+ * ID3 tagging and cover art embedding) inside the user's browser.
+ * Compatible combined MP4 streams are copied without remuxing.
  * Media resolution and network delivery still use server CPU and bandwidth.
  */
 
@@ -225,14 +226,17 @@
       return this.audioContext;
     }
 
-    async fetchStreamWithProgress(url, label, onProgress, startPct, endPct) {
+    async fetchStreamWithProgress(url, label, onProgress, startPct, endPct, maxBytes = this.maxStreamBytes) {
       const response = await fetch(url, { signal: this.abortController?.signal, headers: this.requestHeaders || {} });
       if (!response.ok) {
         throw new Error(`Failed to stream media: HTTP ${response.status}`);
       }
 
       const contentLength = +response.headers.get('Content-Length') || 0;
-      if (contentLength > this.maxStreamBytes) throw new Error('Stream exceeds the browser memory limit. Use server mode.');
+      if (contentLength > maxBytes) {
+        await response.body.cancel();
+        throw new Error('Stream exceeds the browser memory limit. Use server mode.');
+      }
       const reader = response.body.getReader();
       const chunks = [];
       let receivedBytes = 0;
@@ -243,7 +247,7 @@
         const { done, value } = await reader.read();
         if (done) break;
         receivedBytes += value.length;
-        if (receivedBytes > this.maxStreamBytes) {
+        if (receivedBytes > maxBytes) {
           await reader.cancel();
           throw new Error('Stream exceeds the browser memory limit. Use server mode.');
         }
@@ -273,7 +277,17 @@
     }
 
     async process(rawOptions, onProgress) {
-      this.abortController = new AbortController();
+      // Each call owns its cancellation state. A new call must not revive an
+      // older decode/encode operation that is still unwinding after cancellation.
+      const operation = new ClientMediaEngine();
+      operation.getAudioContext = () => this.getAudioContext();
+      operation.maxStreamBytes = this.maxStreamBytes;
+      operation.abortController = new AbortController();
+      this.abortController = operation.abortController;
+      return operation._process(rawOptions, onProgress);
+    }
+
+    async _process(rawOptions, onProgress) {
       this.requestHeaders = rawOptions.requestHeaders || {};
       const options = this._normalizeOptions(rawOptions);
       for (const raw of [options.trimStart, options.trimEnd]) {
@@ -306,6 +320,7 @@
       });
 
       const json = await res.json();
+      this.checkCancelled();
       if (!res.ok || !json.success) {
         throw new Error(json.detail || 'Could not resolve media stream URLs.');
       }
@@ -373,6 +388,7 @@
       }
       // decodeAudioData consumes the ArrayBuffer so slice a copy
       const decoded = await ctx.decodeAudioData(audioBuffer.slice(0));
+      this.checkCancelled();
 
       // Precision Sample Trimming
       let startSample = 0;
@@ -434,7 +450,7 @@
         if ([128, 192, 256, 320].includes(parsedBitrate)) kbps = parsedBitrate;
       }
 
-      const LameModule = window.lamejs || (window.lamejs && window.lamejs.Mp3Encoder ? window.lamejs : null);
+      const LameModule = window.lamejs;
       if (!LameModule) {
         throw new Error('In-browser MP3 encoder (lamejs) not loaded.');
       }
@@ -489,11 +505,11 @@
       let coverArtBytes = null;
       if (normalizedOpts.embedThumbnail && streamInfo.thumbnail) {
         try {
-          const thumbResp = await fetch(`/api/proxy-stream?url=${encodeURIComponent(streamInfo.thumbnail)}`, { signal: this.abortController?.signal, headers: this.requestHeaders || {} });
-          if (thumbResp.ok) {
-            const thumbBuf = await thumbResp.arrayBuffer();
-            coverArtBytes = new Uint8Array(thumbBuf);
-          }
+          const thumbBuf = await this.fetchStreamWithProgress(
+            `/api/proxy-stream?url=${encodeURIComponent(streamInfo.thumbnail)}`,
+            'Cover art', null, 0, 0, 8 * 1024 * 1024
+          );
+          coverArtBytes = new Uint8Array(thumbBuf);
         } catch (e) {
           // Non-fatal if thumbnail blocked
         }

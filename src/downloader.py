@@ -221,6 +221,11 @@ def build_ydl_opts(args: argparse.Namespace) -> dict[str, Any]:
         # Determine merge format if specific extension is requested
         if args.format in ["mp4", "mkv"]:
             ydl_opts["merge_output_format"] = args.format
+            # Combined streams bypass the merger. Explicit remuxing keeps -f's
+            # output contract even when the selected source uses another container.
+            ydl_opts["postprocessors"] = [
+                {"key": "FFmpegVideoRemuxer", "preferedformat": args.format}
+            ]
 
             def get_fmt(res_limit: str = "") -> str:
                 if args.format == "mp4":

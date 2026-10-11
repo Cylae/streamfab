@@ -96,7 +96,7 @@ def validate_and_sanitize_url(url: str) -> str:
         raise SSRFValidationError("URL does not contain a valid hostname.")
 
     # Check for credentials in URL (user:pass@host)
-    if parsed.username or parsed.password:
+    if parsed.username is not None or parsed.password is not None:
         raise SSRFValidationError("Credentials in URL are not allowed.")
 
     # Check port against dangerous service ports
@@ -300,7 +300,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Apply Rate Limiting on API endpoints
         path = request.url.path
         if path.startswith("/api/") and request.headers.get("origin"):
-            origin = urlparse(request.headers["origin"])
+            try:
+                origin = urlparse(request.headers["origin"])
+            except ValueError:
+                return JSONResponse(status_code=403, content={"detail": "Invalid request origin."})
             if origin.netloc != request.headers.get("host") or origin.scheme != request.url.scheme:
                 return JSONResponse(
                     status_code=403, content={"detail": "Cross-origin API access is forbidden."}
@@ -354,22 +357,27 @@ class BodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] not in ("POST", "PUT", "PATCH", "DELETE"):
             return await self.app(scope, receive, send)
-        messages = []
-        total = 0
+        body = bytearray()
         while True:
             message = await receive()
-            messages.append(message)
-            total += len(message.get("body", b""))
-            if total > self.max_bytes:
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > self.max_bytes:
                 return await JSONResponse(
                     status_code=413, content={"detail": "Request body exceeds the size limit."}
                 )(scope, receive, send)
+            body.extend(chunk)
             if not message.get("more_body", False):
                 break
 
+        delivered = False
+
         async def replay():
-            if messages:
-                return messages.pop(0)
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
             return await receive()
 
         await self.app(scope, replay, send)
