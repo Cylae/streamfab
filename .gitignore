@@ -11,3 +11,12 @@ venv/
 *.log
 .pytest_cache/
 .coverage
+
+cookies.txt
+cookies*.txt
+*.cookies
+node_modules/
+coverage.json
+htmlcov/
+.ruff_cache/
+test-results/

@@ -20,6 +20,8 @@
         eventSource: null,
         useClientCompute: true,
         isProcessing: false,
+        operationId: 0,
+        blobUrl: null,
       };
 
       this.dom = {};
@@ -114,6 +116,20 @@
     }
 
     bindEvents() {
+      const actions = new Set(['openCookieModal', 'closeCookieModal', 'hideError', 'hideBotGuidance', 'handleAnalyze', 'switchMediaType', 'setAudioCodec', 'setAudioBitrate', 'setVideoFormat', 'toggleTrimmer', 'resetTrimmer', 'toggleAllPlaylist', 'toggleComputeMode', 'startDownload', 'resetAll', 'cancelCurrentTask', 'deleteCookies', 'switchCookieTab', 'savePastedCookies']);
+      document.querySelectorAll('[data-action]').forEach((element) => {
+        element.addEventListener(element.dataset.event || 'click', (event) => {
+          if (event.type === 'submit') event.preventDefault();
+          const action = element.dataset.action;
+          if (action === 'browseCookies') return this.dom.cookieFileInput.click();
+          if (!actions.has(action)) return;
+          let arg = element.dataset.arg;
+          if (element.dataset.checked) arg = element.checked;
+          else if (arg === 'true' || arg === 'false') arg = arg === 'true';
+          this[action](arg);
+        });
+      });
+      document.getElementById('cookieAdminToken')?.addEventListener('change', () => this.refreshCookieStatus());
       // Theme toggle
       this.dom.themeToggleBtn.addEventListener('click', () => this.toggleTheme());
 
@@ -165,6 +181,7 @@
           } else {
             this.setVideoFormat(format);
             this.state.videoQuality = quality;
+            if (this.state.currentMedia) this.renderVideoResolutions(this.state.currentMedia.available_video_resolutions || []);
             this.updateConvertButtonLabel();
           }
         });
@@ -251,7 +268,8 @@
 
     /* ---------------- Theme Management ---------------- */
     initTheme() {
-      const saved = localStorage.getItem('streamfab_theme');
+      let saved;
+      try { saved = localStorage.getItem('streamfab_theme'); } catch (e) {}
       if (saved) {
         this.setTheme(saved);
       } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
@@ -263,7 +281,7 @@
 
     setTheme(theme) {
       this.dom.html.setAttribute('data-theme', theme);
-      localStorage.setItem('streamfab_theme', theme);
+      try { localStorage.setItem('streamfab_theme', theme); } catch (e) {}
     }
 
     toggleTheme() {
@@ -274,9 +292,12 @@
 
     /* ---------------- Analysis & Metadata ---------------- */
     async handleAnalyze() {
+      if (this.state.isProcessing || this.dom.analyzeBtn.disabled) return;
       const url = this.dom.urlInput.value.trim();
       if (!url) return;
 
+      this.state.currentMedia = null;
+      this.dom.inspectorSection.classList.add('hidden');
       this.hideError();
       this.hideBotGuidance();
       this.setAnalyzeLoading(true);
@@ -284,7 +305,7 @@
       try {
         const res = await fetch('/api/info', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...this.cookieHeaders() },
           body: JSON.stringify({ url }),
         });
 
@@ -350,6 +371,11 @@
 
     renderMediaInfo(info) {
       this.state.currentMedia = info;
+      this.resetTrimmer();
+      this.dom.previewVideoPlayer.pause();
+      this.dom.previewVideoPlayer.removeAttribute('src');
+      this.dom.previewPlayerContainer.classList.add('hidden');
+      this.dom.mediaThumbnail.removeAttribute('src');
 
       // Meta info
       this.dom.mediaTitle.textContent = info.title;
@@ -395,16 +421,16 @@
       }
 
       resolutions.forEach((res, idx) => {
-        const isDefault = idx === 0;
+        const selectedIndex = resolutions.findIndex(r => r.value === this.state.videoQuality);
+        const isDefault = idx === (selectedIndex >= 0 ? selectedIndex : 0);
         const card = document.createElement('label');
         card.className = `radio-card ${isDefault ? 'active' : ''}`;
-        card.innerHTML = `
-          <input type="radio" name="videoRes" value="${res.value}" ${isDefault ? 'checked' : ''}>
-          <span class="card-content">
-            <span class="card-title">${res.label}</span>
-            <span class="card-desc">${res.height ? res.height + 'p Original stream' : 'Optimal'}</span>
-          </span>
-        `;
+        const input = document.createElement('input');
+        input.type = 'radio'; input.name = 'videoRes'; input.value = res.value; input.checked = isDefault;
+        const content = document.createElement('span'); content.className = 'card-content';
+        const title = document.createElement('span'); title.className = 'card-title'; title.textContent = res.label;
+        const desc = document.createElement('span'); desc.className = 'card-desc'; desc.textContent = res.height ? `${res.height}p Original stream` : 'Optimal';
+        content.append(title, desc); card.append(input, content);
         card.querySelector('input').addEventListener('change', () => {
           this.dom.videoResolutionsGrid.querySelectorAll('.radio-card').forEach((c) => c.classList.remove('active'));
           card.classList.add('active');
@@ -414,9 +440,8 @@
         this.dom.videoResolutionsGrid.appendChild(card);
       });
 
-      if (resolutions[0]) {
-        this.state.videoQuality = resolutions[0].value;
-      }
+      const selected = this.dom.videoResolutionsGrid.querySelector('input:checked');
+      if (selected) this.state.videoQuality = selected.value;
     }
 
     renderSubtitles(subs) {
@@ -434,12 +459,12 @@
       entries.forEach((item) => {
         const div = document.createElement('div');
         div.className = 'playlist-item';
-        div.innerHTML = `
-          <input type="checkbox" class="playlist-check" data-idx="${item.index}" checked>
-          <span class="playlist-idx">#${item.index}</span>
-          <span class="playlist-item-title" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.title}</span>
-          <span class="playlist-item-dur" style="font-family:var(--font-mono); color:var(--text-muted); font-size:0.75rem;">${item.duration_formatted}</span>
-        `;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.className = 'playlist-check'; checkbox.dataset.idx = item.index; checkbox.checked = true;
+        const index = document.createElement('span'); index.className = 'playlist-idx'; index.textContent = `#${item.index}`;
+        const title = document.createElement('span'); title.className = 'playlist-item-title'; title.textContent = item.title;
+        const duration = document.createElement('span'); duration.className = 'playlist-item-dur'; duration.textContent = item.duration_formatted;
+        div.append(checkbox, index, title, duration);
         this.dom.playlistList.appendChild(div);
       });
     }
@@ -497,7 +522,8 @@
     setAudioBitrate(bitrate) {
       this.state.audioBitrate = bitrate;
       document.querySelectorAll('input[name="audioBitrate"]').forEach((inp) => {
-        inp.closest('.radio-card').classList.toggle('active', inp.value === bitrate);
+        inp.checked = inp.value === bitrate;
+        inp.closest('.radio-card').classList.toggle('active', inp.checked);
       });
       this.updateConvertButtonLabel();
     }
@@ -534,14 +560,14 @@
       const cpuMetric = document.getElementById('metricCpu');
       if (isClient) {
         if (badge) {
-          badge.textContent = 'In-Browser Client (0% Server CPU)';
+          badge.textContent = 'In-Browser Audio Processing';
           badge.classList.remove('cloud');
         }
         if (desc) {
-          desc.textContent = 'Computations (decoding, trimming, MP3 encoding & tagging) run 100% on your device CPU for maximum privacy & zero server load.';
+          desc.textContent = 'MP3 and WAV encoding runs on your device. Resolution and delivery still use the server.';
         }
         if (cpuMetric) {
-          cpuMetric.textContent = '0.0% (Zero Load)';
+          cpuMetric.textContent = 'Browser Encoding';
           cpuMetric.className = 'metric-value badge-success';
         }
       } else {
@@ -564,8 +590,15 @@
       if (this.state.isProcessing) return;
       if (!this.state.currentMedia) return;
       this.state.isProcessing = true;
+      const operationId = ++this.state.operationId;
+      this.state.activeTaskId = null;
+      if (this.state.eventSource) this.state.eventSource.close();
+      if (this.state.blobUrl) URL.revokeObjectURL(this.state.blobUrl);
+      this.state.blobUrl = null;
+      this.dom.finalDownloadLink.classList.remove('hidden');
 
       const payload = {
+        requestHeaders: this.cookieHeaders(),
         url: this.state.currentMedia.url,
         media_type: this.state.mediaType,
         audio_format: this.state.audioCodec,
@@ -585,9 +618,12 @@
         this.dom.playlistList.querySelectorAll('.playlist-check:checked').forEach((cb) => {
           checked.push(parseInt(cb.dataset.idx, 10));
         });
-        if (checked.length > 0) {
-          payload.playlist_indices = checked;
+        if (checked.length === 0) {
+          this.state.isProcessing = false;
+          this.showError('Select at least one playlist item.');
+          return;
         }
+        payload.playlist_indices = checked;
       }
 
       this.hideError();
@@ -598,13 +634,14 @@
       this.dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
       // In-Browser Client-Side Processing (0% Server CPU)
-      if (this.state.useClientCompute && window.StreamFabClientEngine) {
+      if (this.state.useClientCompute && window.StreamFabClientEngine && !payload.playlist_indices && !payload.subtitle_lang && (payload.media_type !== 'audio' || (payload.audio_format === 'mp3' || (payload.audio_format === 'wav' && !payload.embed_metadata)))) {
         try {
           if (this.dom.metricCpu) {
-            this.dom.metricCpu.textContent = '0.0% (Zero Load)';
+            this.dom.metricCpu.textContent = 'Browser Encoding';
             this.dom.metricCpu.className = 'metric-value badge-success';
           }
           const result = await window.StreamFabClientEngine.process(payload, (prog) => {
+            if (operationId !== this.state.operationId) return;
             const pct = Math.max(0, Math.min(100, prog.percent || 0));
             this.dom.progressBarFill.style.width = `${pct}%`;
             this.dom.progressPercentBadge.textContent = `${pct}%`;
@@ -614,10 +651,12 @@
             this.dom.metricStatus.textContent = prog.status === 'completed' ? 'Completed (Client)' : (prog.status === 'encoding' ? 'Encoding (Client)' : 'Client Engine');
           });
 
+          if (operationId !== this.state.operationId) return;
           // Trigger browser file download directly
           window.downloadBlob(result.blob, result.filename);
           this.dom.downloadBtnText.textContent = `Save ${result.filename}`;
-          this.dom.finalDownloadLink.href = URL.createObjectURL(result.blob);
+          this.state.blobUrl = URL.createObjectURL(result.blob);
+          this.dom.finalDownloadLink.href = this.state.blobUrl;
           this.dom.finalDownloadLink.download = result.filename;
           this.dom.cancelActionRow.classList.add('hidden');
           this.dom.downloadReadyActions.classList.remove('hidden');
@@ -626,16 +665,19 @@
           this.state.isProcessing = false;
           return;
         } catch (clientErr) {
+          if (operationId !== this.state.operationId || clientErr.name === 'AbortError') return;
           console.warn('Client-side processing fallback to server:', clientErr);
           this.dom.progressDetail.textContent = 'Switching to server engine...';
         }
       }
 
+      if (operationId !== this.state.operationId) return;
+      if (this.dom.metricCpu) this.dom.metricCpu.textContent = 'Server FFmpeg';
       // Server-Side Fallback Mode
       try {
         const res = await fetch('/api/download', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...this.cookieHeaders() },
           body: JSON.stringify(payload),
         });
 
@@ -644,9 +686,14 @@
           throw new Error(data.detail || 'Unable to start task.');
         }
 
+        if (operationId !== this.state.operationId) {
+          await fetch(`/api/cancel/${data.task_id}`, { method: 'POST' });
+          return;
+        }
         this.state.activeTaskId = data.task_id;
         this.listenToProgress(data.task_id);
       } catch (err) {
+        if (operationId !== this.state.operationId) return;
         this.state.isProcessing = false;
         this.showError(err.message || 'Error while starting conversion.');
         this.dom.progressSection.classList.add('hidden');
@@ -663,6 +710,7 @@
       this.state.eventSource = evtSource;
 
       evtSource.onmessage = (event) => {
+        if (this.state.activeTaskId !== taskId) return;
         try {
           const data = JSON.parse(event.data);
           this.updateProgressUI(data);
@@ -683,7 +731,10 @@
       };
 
       evtSource.onerror = () => {
-        // EventSource will automatically attempt reconnection if transient
+        if (evtSource.readyState === EventSource.CLOSED && this.state.activeTaskId === taskId) {
+          this.handleError('Progress connection closed. The task may have expired or the server restarted.');
+        }
+        // EventSource automatically reconnects after transient failures.
       };
     }
 
@@ -735,9 +786,12 @@
     }
 
     async cancelCurrentTask() {
-      if (!this.state.activeTaskId) return;
+      if (window.StreamFabClientEngine) window.StreamFabClientEngine.cancel();
+      const taskId = this.state.activeTaskId;
+      this.resetAll();
+      if (!taskId) return;
       try {
-        await fetch(`/api/cancel/${this.state.activeTaskId}`, { method: 'POST' });
+        await fetch(`/api/cancel/${taskId}`, { method: 'POST' });
       } catch (e) {}
       if (this.state.eventSource) {
         this.state.eventSource.close();
@@ -746,11 +800,19 @@
     }
 
     /* ---------------- Cookie Session Assistant Logic ---------------- */
+    cookieHeaders() {
+      const token = document.getElementById('cookieAdminToken')?.value || '';
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+
     async refreshCookieStatus() {
       try {
-        const res = await fetch('/api/cookies');
+        const res = await fetch('/api/cookies', { headers: this.cookieHeaders() });
         const json = await res.json();
-        if (!res.ok || !json.success) return;
+        if (!res.ok || !json.success) {
+          if (this.dom.cookieModalStatusText) this.dom.cookieModalStatusText.textContent = json.detail || 'Cookie administration unavailable.';
+          return;
+        }
 
         const data = json.data || {};
         if (data.has_cookies) {
@@ -846,8 +908,9 @@
       try {
         const res = await fetch('/api/cookies', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: clean }),
+          // Tokens are kept in memory and are never persisted.
+          headers: { 'Content-Type': 'application/json', ...this.cookieHeaders() },
         });
         const json = await res.json();
         if (!res.ok || !json.success) {
@@ -886,7 +949,7 @@
     async deleteCookies() {
       if (!confirm('Are you sure you want to remove active cookies?')) return;
       try {
-        const res = await fetch('/api/cookies', { method: 'DELETE' });
+        const res = await fetch('/api/cookies', { method: 'DELETE', headers: this.cookieHeaders() });
         const json = await res.json();
         if (!res.ok || !json.success) {
           throw new Error(json.detail || 'Failed to remove cookies.');
@@ -899,6 +962,11 @@
     }
 
     resetAll() {
+      ++this.state.operationId;
+      if (this.state.blobUrl) URL.revokeObjectURL(this.state.blobUrl);
+      this.state.blobUrl = null;
+      this.dom.finalDownloadLink.removeAttribute('href');
+      this.dom.finalDownloadLink.classList.remove('hidden');
       if (this.state.eventSource) {
         this.state.eventSource.close();
       }

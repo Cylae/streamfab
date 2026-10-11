@@ -7,54 +7,123 @@ real-time SSE progress streaming, and direct browser delivery.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
+import os
 import re
 import urllib.parse
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Annotated, Any, Literal
 
-import httpx
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from starlette.background import BackgroundTask
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from engine import (
     DOWNLOADS_DIR,
     DownloadOptions,
+    classify_engine_error,
     delete_cookies_file,
     engine,
     extract_media_info,
+    get_cookiefile_opt,
     get_cookies_status,
     parse_timestamp,
     resolve_stream_urls,
     save_cookies_text,
 )
+from networking import public_async_client
 from security import (
+    BodyLimitMiddleware,
     SecurityHeadersMiddleware,
     sanitize_filename,
     validate_and_sanitize_url,
     validate_timestamp_strict,
 )
 
+_background_tasks = set()
+_extraction_active = 0
+_proxy_active = 0
+
+
+@asynccontextmanager
+async def lifespan(app):
+    async def maintenance():
+        while True:
+            await asyncio.sleep(60)
+            engine.cleanup_old_tasks()
+
+    cleanup = asyncio.create_task(maintenance())
+    try:
+        yield
+    finally:
+        cleanup.cancel()
+        for task in engine.tasks.values():
+            task.cancel()
+        await asyncio.gather(cleanup, *_background_tasks, return_exceptions=True)
+
+
+async def extract_bounded(function, *args):
+    global _extraction_active
+    if _extraction_active >= 4:
+        raise HTTPException(
+            status_code=503, detail="Media analysis capacity reached. Please try again later."
+        )
+    _extraction_active += 1
+    future = asyncio.get_running_loop().run_in_executor(None, function, *args)
+
+    def release(_):
+        global _extraction_active
+        _extraction_active -= 1
+
+    future.add_done_callback(release)
+    return await asyncio.shield(future)
+
+
+async def require_cookie_admin(request: Request):
+    token = os.getenv("STREAMFAB_ADMIN_TOKEN")
+    if token:
+        provided = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if not hmac.compare_digest(provided.encode(), token.encode()):
+            raise HTTPException(
+                status_code=403, detail="Cookie administration requires the configured admin token."
+            )
+    elif not request.client or request.client.host not in ("127.0.0.1", "::1"):
+        raise HTTPException(
+            status_code=403, detail="Cookie administration is restricted to localhost."
+        )
+
+
+async def require_media_user(request: Request):
+    # A shared cookie jar must never lend the owner's session to anonymous users.
+    if get_cookiefile_opt():
+        await require_cookie_admin(request)
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="StreamFab Web API",
     description="Ultra-fast media conversion and download engine surpassing NoTube.",
     version="2.0.0",
 )
 
 # Apply strict security headers & rate limiting
+app.add_middleware(BodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Enable CORS for local and remote web access
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        h.strip()
+        for h in os.getenv("STREAMFAB_TRUSTED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
+        if h.strip()
+    ],
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -62,7 +131,7 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class InfoRequest(BaseModel):
-    url: str = Field(..., description="Target media or playlist URL")
+    url: str = Field(..., max_length=8192, description="Target media or playlist URL")
 
     @field_validator("url")
     @classmethod
@@ -70,40 +139,45 @@ class InfoRequest(BaseModel):
         clean = v.strip()
         if not clean:
             raise ValueError("URL cannot be empty.")
-        if not re.match(r"^https?://[^\s/$.?#].[^\s]*$", clean, re.IGNORECASE):
-            # Allow common short forms like 'youtu.be/...'
-            if not any(clean.startswith(prefix) for prefix in ("http://", "https://", "www.", "youtu.be", "youtube.com")):
-                raise ValueError("Please provide a valid URL (e.g. https://...).")
-            if not clean.startswith(("http://", "https://")):
-                clean = "https://" + clean
+        if not clean.startswith(("http://", "https://")):
+            clean = "https://" + clean
+        try:
+            parsed = urllib.parse.urlparse(clean)
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                raise ValueError("Please provide an HTTP/HTTPS URL without credentials.")
+            if any(c.isspace() for c in clean) or "\\" in clean or len(clean) > 8192:
+                raise ValueError("Invalid URL characters or length.")
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Please provide a valid HTTP/HTTPS URL.") from exc
         return clean
 
 
-class DownloadRequest(BaseModel):
-    url: str
-    media_type: str = Field(default="audio")  # audio or video
-    audio_format: str = Field(default="mp3")
-    audio_quality: str = Field(default="320k")
-    video_format: str = Field(default="mp4")
-    video_quality: str = Field(default="best")
-    trim_start: Optional[str] = None
-    trim_end: Optional[str] = None
+class DownloadRequest(InfoRequest):
+    media_type: Literal["audio", "video"] = "audio"  # audio or video
+    audio_format: Literal["mp3", "m4a", "flac", "wav", "opus"] = "mp3"
+    audio_quality: Literal["320k", "256k", "192k", "128k", "best"] = "320k"
+    video_format: Literal["mp4", "mkv", "webm"] = "mp4"
+    video_quality: str = Field(default="best", pattern=r"^(best|worst|4k|2k|[1-9][0-9]{1,3}p)$")
+    trim_start: str | None = None
+    trim_end: str | None = None
     embed_metadata: bool = True
     embed_thumbnail: bool = True
-    subtitle_lang: Optional[str] = None
-    playlist_indices: Optional[List[int]] = None
-
-    @field_validator("url")
-    @classmethod
-    def clean_url(cls, v: str) -> str:
-        s = v.strip()
-        if not s.startswith(("http://", "https://")):
-            return "https://" + s
-        return s
+    subtitle_lang: str | None = Field(
+        default=None, max_length=30, pattern=r"^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$"
+    )
+    playlist_indices: list[Annotated[int, Field(strict=True, ge=1, le=1000)]] | None = Field(
+        default=None, min_length=1, max_length=250
+    )
 
     @field_validator("trim_start", "trim_end")
     @classmethod
-    def validate_timestamp_format(cls, v: Optional[str]) -> Optional[str]:
+    def validate_timestamp_format(cls, v: str | None) -> str | None:
         if not v or not str(v).strip():
             return None
         try:
@@ -114,11 +188,11 @@ class DownloadRequest(BaseModel):
 
     @field_validator("trim_end")
     @classmethod
-    def validate_trim(cls, v: Optional[str], info) -> Optional[str]:
+    def validate_trim(cls, v: str | None, info) -> str | None:
         # Validate trim start/end timestamps if provided
         start_raw = info.data.get("trim_start")
-        if v and start_raw:
-            s_sec = parse_timestamp(start_raw)
+        if v:
+            s_sec = parse_timestamp(start_raw) or 0
             e_sec = parse_timestamp(v)
             if s_sec is not None and e_sec is not None and e_sec <= s_sec:
                 raise ValueError("End time must be greater than start time.")
@@ -126,55 +200,44 @@ class DownloadRequest(BaseModel):
 
 
 @app.get("/api/health")
-async def health_check() -> Dict[str, Any]:
+async def health_check() -> dict[str, Any]:
     """Health check endpoint."""
     return {
         "status": "healthy",
         "service": "streamfab",
         "version": "2.0.0",
-        "active_tasks": len(engine.tasks),
+        "active_tasks": sum(
+            t.progress.status in ("queued", "downloading", "converting")
+            for t in engine.tasks.values()
+        ),
     }
 
 
-@app.post("/api/info")
-async def get_info(req: InfoRequest) -> Dict[str, Any]:
+@app.post("/api/info", dependencies=[Depends(require_media_user)])
+async def get_info(req: InfoRequest) -> dict[str, Any]:
     """Extract metadata, available resolutions, and options for a given URL."""
-    loop = asyncio.get_running_loop()
     try:
         # Offload yt-dlp metadata extraction to threadpool to keep async loop fast
-        data = await loop.run_in_executor(None, extract_media_info, req.url)
+        data = await extract_bounded(extract_media_info, req.url)
         return {"success": True, "data": data}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=classify_engine_error(exc),
         ) from exc
 
 
-class StreamUrlsRequest(BaseModel):
-    url: str
-    media_type: str = Field(default="audio")  # audio or video
-    audio_format: str = Field(default="mp3")
-    audio_quality: str = Field(default="320k")
-    video_format: str = Field(default="mp4")
-    video_quality: str = Field(default="best")
-
-    @field_validator("url")
-    @classmethod
-    def clean_url(cls, v: str) -> str:
-        s = v.strip()
-        if not s.startswith(("http://", "https://")):
-            return "https://" + s
-        return s
+class StreamUrlsRequest(DownloadRequest):
+    pass
 
 
-@app.post("/api/stream-urls")
-async def get_stream_urls(req: StreamUrlsRequest) -> Dict[str, Any]:
+@app.post("/api/stream-urls", dependencies=[Depends(require_media_user)])
+async def get_stream_urls(req: StreamUrlsRequest) -> dict[str, Any]:
     """Resolve direct/proxied stream URLs for zero-server-CPU client-side processing."""
-    loop = asyncio.get_running_loop()
     try:
-        data = await loop.run_in_executor(
-            None,
+        data = await extract_bounded(
             resolve_stream_urls,
             req.url,
             req.media_type,
@@ -184,24 +247,32 @@ async def get_stream_urls(req: StreamUrlsRequest) -> Dict[str, Any]:
         )
         result = dict(data)
         if data.get("audio_stream_url"):
-            result["audio_proxy_url"] = f"/api/proxy-stream?url={urllib.parse.quote(data['audio_stream_url'])}"
+            result["audio_proxy_url"] = (
+                f"/api/proxy-stream?url={urllib.parse.quote(data['audio_stream_url'])}"
+            )
         if data.get("video_stream_url"):
-            result["video_proxy_url"] = f"/api/proxy-stream?url={urllib.parse.quote(data['video_stream_url'])}"
+            result["video_proxy_url"] = (
+                f"/api/proxy-stream?url={urllib.parse.quote(data['video_stream_url'])}"
+            )
         if data.get("combined_stream_url"):
-            result["combined_proxy_url"] = f"/api/proxy-stream?url={urllib.parse.quote(data['combined_stream_url'])}"
+            result["combined_proxy_url"] = (
+                f"/api/proxy-stream?url={urllib.parse.quote(data['combined_stream_url'])}"
+            )
         return {"success": True, "data": result}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=classify_engine_error(exc),
         ) from exc
 
 
-@app.get("/api/proxy-stream")
+@app.get("/api/proxy-stream", dependencies=[Depends(require_media_user)])
 async def proxy_stream(url: str, request: Request) -> StreamingResponse:
     """Zero-CPU asynchronous stream pass-through with Range support for browser clients."""
     try:
-        current_url = validate_and_sanitize_url(url)
+        current_url = await asyncio.to_thread(validate_and_sanitize_url, url)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid stream URL: {exc}")
 
@@ -210,10 +281,19 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     if range_header:
+        if len(range_header) > 100 or not re.fullmatch(
+            r"bytes=(?:[0-9]+-[0-9]*|-[0-9]+)", range_header
+        ):
+            raise HTTPException(status_code=400, detail="Only one byte range is supported.")
         req_headers["Range"] = range_header
+    req_headers["Accept-Encoding"] = "identity"
 
     # Do not auto-follow redirects blindly to prevent SSRF bypass via 302 redirects
-    client = httpx.AsyncClient(timeout=60.0, follow_redirects=False)
+    global _proxy_active
+    if _proxy_active >= 16:
+        raise HTTPException(status_code=503, detail="Stream capacity reached. Try again later.")
+    _proxy_active += 1
+    client = public_async_client()
     upstream_resp = None
     try:
         for _ in range(5):
@@ -223,7 +303,7 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
                 raw_loc = resp.headers["location"]
                 await resp.aclose()
                 next_url = urllib.parse.urljoin(current_url, raw_loc)
-                current_url = validate_and_sanitize_url(next_url)
+                current_url = await asyncio.to_thread(validate_and_sanitize_url, next_url)
                 continue
             upstream_resp = resp
             break
@@ -231,41 +311,72 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
         if upstream_resp is None:
             raise HTTPException(status_code=502, detail="Too many redirects from upstream stream.")
     except HTTPException:
+        _proxy_active -= 1
         await client.aclose()
         raise
-    except Exception as exc:
+    except Exception:
+        _proxy_active -= 1
         if upstream_resp:
             await upstream_resp.aclose()
         await client.aclose()
-        raise HTTPException(status_code=502, detail=f"Upstream stream error: {exc}")
+        raise HTTPException(status_code=502, detail="Upstream stream request failed.")
 
+    content_type = (
+        upstream_resp.headers.get("content-type", "application/octet-stream")
+        .split(";", 1)[0]
+        .strip()
+        .lower()
+    )
+    if not (
+        content_type.startswith(("audio/", "video/"))
+        or content_type
+        in ("image/jpeg", "image/png", "image/webp", "application/octet-stream", "application/mp4")
+    ):
+        _proxy_active -= 1
+        await upstream_resp.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="Upstream response is not supported media.")
     resp_headers = {
-        "Access-Control-Allow-Origin": "*",
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "private, no-store",
     }
-    for h in ("content-type", "content-length", "content-range"):
+    for h in ("content-type", "content-length", "content-range", "content-encoding"):
         if h in upstream_resp.headers:
             resp_headers[h] = upstream_resp.headers[h]
 
-    async def stream_generator():
-        try:
-            async for chunk in upstream_resp.aiter_bytes(chunk_size=65536):
-                yield chunk
-        finally:
+    closed = False
+
+    async def close_stream():
+        nonlocal closed
+        global _proxy_active
+        if not closed:
+            closed = True
+            _proxy_active -= 1
             await upstream_resp.aclose()
             await client.aclose()
 
+    async def stream_generator():
+        total = 0
+        try:
+            async for chunk in upstream_resp.aiter_raw(chunk_size=65536):
+                total += len(chunk)
+                if total > 2 * 1024**3:
+                    break
+                yield chunk
+        finally:
+            await close_stream()
+
     return StreamingResponse(
         stream_generator(),
+        background=BackgroundTask(close_stream),
         status_code=upstream_resp.status_code,
         headers=resp_headers,
         media_type=upstream_resp.headers.get("content-type", "application/octet-stream"),
     )
 
 
-@app.post("/api/download")
-async def start_download(req: DownloadRequest) -> Dict[str, Any]:
+@app.post("/api/download", dependencies=[Depends(require_media_user)])
+async def start_download(req: DownloadRequest) -> dict[str, Any]:
     """Initiate a download task with high performance settings."""
     options = DownloadOptions(
         url=req.url,
@@ -281,9 +392,17 @@ async def start_download(req: DownloadRequest) -> Dict[str, Any]:
         subtitle_lang=req.subtitle_lang,
         playlist_indices=req.playlist_indices,
     )
-    task = engine.create_task(options)
-    # Launch in asyncio background task
-    asyncio.create_task(engine.run_task(task))
+    try:
+        await asyncio.to_thread(validate_and_sanitize_url, options.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid or forbidden media URL.") from exc
+    try:
+        task = engine.create_task(options)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    background = asyncio.create_task(engine.run_task(task))
+    _background_tasks.add(background)
+    background.add_done_callback(_background_tasks.discard)
     return {
         "success": True,
         "task_id": task.task_id,
@@ -296,7 +415,8 @@ async def stream_progress(task_id: str) -> StreamingResponse:
     """Stream real-time download and conversion progress via Server-Sent Events (SSE)."""
     # Validate UUID to prevent injection
     try:
-        uuid.UUID(task_id)
+        if str(uuid.UUID(task_id)) != task_id:
+            raise ValueError("Non-canonical task ID")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid task ID.")
 
@@ -335,25 +455,33 @@ async def stream_progress(task_id: str) -> StreamingResponse:
 async def download_file(task_id: str) -> FileResponse:
     """Serve the final converted file safely with proper Content-Disposition."""
     try:
-        uuid.UUID(task_id)
+        if str(uuid.UUID(task_id)) != task_id:
+            raise ValueError("Non-canonical task ID")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid task ID.")
 
     task = engine.get_task(task_id)
-    file_path: Optional[Path] = None
-    filename: Optional[str] = None
+    file_path: Path | None = None
+    filename: str | None = None
 
-    if task and task.progress.status == "completed" and task.progress.file_path:
-        file_path = Path(task.progress.file_path).resolve()
-        filename = task.progress.filename or file_path.name
+    expected_dir = (DOWNLOADS_DIR / task_id).resolve()
+    if not expected_dir.is_relative_to(DOWNLOADS_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Unauthorized access.")
+    if task:
+        if task.progress.status == "completed" and task.progress.file_path:
+            file_path = Path(task.progress.file_path).resolve()
+            filename = sanitize_filename(task.progress.filename or file_path.name)
     else:
-        # Fallback check on disk in case server restarted or task evicted
-        expected_dir = (DOWNLOADS_DIR / task_id).resolve()
-        if expected_dir.is_dir():
-            files = [f for f in expected_dir.iterdir() if f.is_file() and not f.name.endswith((".part", ".ytdl"))]
-            if files:
-                file_path = max(files, key=lambda f: f.stat().st_size).resolve()
-                filename = sanitize_filename(file_path.name)
+        marker = expected_dir / "completed.json"
+        if marker.is_file() and not marker.is_symlink():
+            try:
+                record = json.loads(marker.read_text(encoding="utf-8"))
+                name = record["filename"]
+                if isinstance(name, str) and Path(name).name == name:
+                    file_path = (expected_dir / name).resolve()
+                    filename = sanitize_filename(name)
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
 
     if not file_path or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not ready or task does not exist.")
@@ -387,10 +515,11 @@ async def download_file(task_id: str) -> FileResponse:
 
 
 @app.post("/api/cancel/{task_id}")
-async def cancel_download(task_id: str) -> Dict[str, Any]:
+async def cancel_download(task_id: str) -> dict[str, Any]:
     """Cancel an ongoing download task."""
     try:
-        uuid.UUID(task_id)
+        if str(uuid.UUID(task_id)) != task_id:
+            raise ValueError("Non-canonical task ID")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid task ID.")
 
@@ -407,14 +536,14 @@ class CookiePayload(BaseModel):
 
 
 @app.get("/api/cookies")
-async def get_cookies() -> Dict[str, Any]:
+async def get_cookies(_=Depends(require_cookie_admin)) -> dict[str, Any]:
     """Get status of installed cookies.txt file."""
     status_data = get_cookies_status()
     return {"success": True, "data": status_data}
 
 
 @app.post("/api/cookies")
-async def upload_cookies(payload: CookiePayload) -> Dict[str, Any]:
+async def upload_cookies(payload: CookiePayload, _=Depends(require_cookie_admin)) -> dict[str, Any]:
     """Upload or paste Netscape format cookies.txt to bypass YouTube bot challenges."""
     try:
         updated = save_cookies_text(payload.content)
@@ -424,7 +553,7 @@ async def upload_cookies(payload: CookiePayload) -> Dict[str, Any]:
 
 
 @app.delete("/api/cookies")
-async def remove_cookies() -> Dict[str, Any]:
+async def remove_cookies(_=Depends(require_cookie_admin)) -> dict[str, Any]:
     """Remove installed cookies.txt."""
     deleted = delete_cookies_file()
     return {"success": True, "deleted": deleted}
@@ -442,7 +571,6 @@ async def serve_index():
     if index_file.exists():
         return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>StreamFab Web Server Ready. Frontend initializing...</h1>")
-
 
 
 # Mount static assets (css, js, assets)

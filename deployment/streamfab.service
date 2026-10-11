@@ -4,18 +4,25 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=streamfab
+Group=streamfab
 WorkingDirectory=/var/www/streamfab
 Environment="PATH=/var/www/streamfab/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+Environment="STREAMFAB_STORAGE_DIR=/var/lib/streamfab/downloads"
+Environment="STREAMFAB_COOKIES_FILE=/var/lib/streamfab/cookies.txt"
+EnvironmentFile=-/etc/streamfab.env
+StateDirectory=streamfab
+UMask=0077
 ExecStart=/var/www/streamfab/venv/bin/python src/downloader.py --web --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 
 # Sandboxing and security hardening
 NoNewPrivileges=true
-ProtectSystem=full
+ProtectSystem=strict
+ReadWritePaths=/var/lib/streamfab
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true

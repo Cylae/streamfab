@@ -3,7 +3,7 @@
  *
  * Executes 100% of the media computation (decoding, trimming, audio encoding,
  * ID3 tagging, cover art embedding, and MP4 remuxing) inside the user's browser.
- * Reduces server CPU utilization to 0.0%.
+ * Media resolution and network delivery still use server CPU and bandwidth.
  */
 
 (function (window) {
@@ -14,34 +14,36 @@
     if (!str || typeof str !== 'string') return null;
     const clean = str.trim();
     if (!clean) return null;
+    if (!/^(?:\d{1,5}(?:\.\d{1,3})?|(?:\d{1,2}:)?\d{1,2}:\d{1,2}(?:\.\d{1,3})?)$/.test(clean)) return null;
     const parts = clean.split(':').map(Number);
-    if (parts.some(isNaN)) return null;
-    if (parts.length === 3) {
-      return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    } else if (parts.length === 2) {
-      return parts[0] * 60 + parts[1];
-    } else if (parts.length === 1) {
-      return parts[0];
-    }
-    return null;
+    if (parts.length > 1 && (parts.at(-1) >= 60 || parts.at(-2) >= 60)) return null;
+    const seconds = parts.reduce((total, n) => total * 60 + n, 0);
+    return Number.isFinite(seconds) && seconds <= 86400 ? seconds : null;
   }
 
   // --- Utility: Sanitize filename ---
   function sanitizeName(name, ext) {
-    let clean = (name || 'StreamFab_Media').replace(/[\\/:*?"<>|]+/g, '_').trim();
+    let clean = (name || 'StreamFab_Media').replace(/[\x00-\x1f\x7f\\/:*?"<>|]+/g, '_').trim();
     if (clean.length > 80) clean = clean.substring(0, 80).trim();
     return `${clean}.${ext}`;
   }
 
   // --- ID3v2.3 Tag Builder (Pure JavaScript) ---
   function buildID3v2Tag(metadata, imageUint8Array) {
-    function encodeUtf8(str) {
-      return new TextEncoder().encode(str);
+    function encodeUtf16(text) {
+      const result = new Uint8Array(2 + text.length * 2);
+      result[0] = 0xff; result[1] = 0xfe;
+      for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        result[2 + i * 2] = code & 0xff;
+        result[3 + i * 2] = code >> 8;
+      }
+      return result;
     }
 
     function makeTextFrame(id, text) {
-      const textBytes = encodeUtf8(text);
-      const bodyLen = 1 + textBytes.length; // 1 byte for encoding (0x03 = UTF-8)
+      const textBytes = encodeUtf16(String(text));
+      const bodyLen = 1 + textBytes.length;
       const frame = new Uint8Array(10 + bodyLen);
       // Frame ID (4 bytes)
       for (let i = 0; i < 4; i++) frame[i] = id.charCodeAt(i);
@@ -54,14 +56,16 @@
       frame[8] = 0;
       frame[9] = 0;
       // Body
-      frame[10] = 0x03; // UTF-8
+      frame[10] = 0x01; // ID3v2.3 UTF-16 with BOM
       frame.set(textBytes, 11);
       return frame;
     }
 
     function makeApicFrame(imgBytes) {
       if (!imgBytes || imgBytes.length === 0) return new Uint8Array(0);
-      const mime = new TextEncoder().encode('image/jpeg\0');
+      const imageMime = imgBytes[0] === 0xff && imgBytes[1] === 0xd8 ? 'image/jpeg' : imgBytes[0] === 0x89 && imgBytes[1] === 0x50 ? 'image/png' : null;
+      if (!imageMime) return new Uint8Array(0);
+      const mime = new TextEncoder().encode(imageMime + '\0');
       const desc = new Uint8Array([0x00]); // empty description
       const bodyLen = 1 + mime.length + 1 + desc.length + imgBytes.length;
       const frame = new Uint8Array(10 + bodyLen);
@@ -181,11 +185,24 @@
   class ClientMediaEngine {
     constructor() {
       this.audioContext = null;
+      this.abortController = null;
+      this.maxStreamBytes = 128 * 1024 * 1024;
+    }
+
+    cancel() {
+      if (this.abortController) this.abortController.abort();
+    }
+
+    checkCancelled() {
+      if (this.abortController?.signal.aborted) {
+        const error = new Error('Processing cancelled.'); error.name = 'AbortError'; throw error;
+      }
     }
 
     _normalizeOptions(opts) {
       const o = opts || {};
       return {
+        requestHeaders: o.requestHeaders || {},
         url: o.url,
         mediaType: (o.mediaType || o.media_type || 'audio').toLowerCase(),
         audioCodec: (o.audioCodec || o.audio_format || 'mp3').toLowerCase(),
@@ -209,22 +226,28 @@
     }
 
     async fetchStreamWithProgress(url, label, onProgress, startPct, endPct) {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: this.abortController?.signal, headers: this.requestHeaders || {} });
       if (!response.ok) {
         throw new Error(`Failed to stream media: HTTP ${response.status}`);
       }
 
       const contentLength = +response.headers.get('Content-Length') || 0;
+      if (contentLength > this.maxStreamBytes) throw new Error('Stream exceeds the browser memory limit. Use server mode.');
       const reader = response.body.getReader();
       const chunks = [];
       let receivedBytes = 0;
       let startTime = Date.now();
 
       while (true) {
+        this.checkCancelled();
         const { done, value } = await reader.read();
         if (done) break;
-        chunks.push(value);
         receivedBytes += value.length;
+        if (receivedBytes > this.maxStreamBytes) {
+          await reader.cancel();
+          throw new Error('Stream exceeds the browser memory limit. Use server mode.');
+        }
+        chunks.push(value);
 
         if (contentLength > 0 && onProgress) {
           const ratio = receivedBytes / contentLength;
@@ -250,7 +273,13 @@
     }
 
     async process(rawOptions, onProgress) {
+      this.abortController = new AbortController();
+      this.requestHeaders = rawOptions.requestHeaders || {};
       const options = this._normalizeOptions(rawOptions);
+      for (const raw of [options.trimStart, options.trimEnd]) {
+        if (raw && parseTimestampToSeconds(raw) === null) throw new Error('Invalid trim timestamp.');
+      }
+      if (options.subtitleLang) throw new Error('Subtitles require server-side FFmpeg engine.');
 
       // 1. Resolve direct stream URLs (Zero server CPU)
       if (onProgress) {
@@ -258,13 +287,14 @@
           status: 'resolving',
           percent: 5,
           speed: 'Instant',
-          detail: 'Connecting to direct stream CDN (0% Server CPU)...',
+          detail: 'Connecting to direct stream CDN (browser encoding)...',
         });
       }
 
       const res = await fetch('/api/stream-urls', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        signal: this.abortController?.signal,
+        headers: { 'Content-Type': 'application/json', ...options.requestHeaders },
         body: JSON.stringify({
           url: options.url,
           media_type: options.mediaType,
@@ -353,9 +383,8 @@
       if (trimEndSec !== null && trimEndSec > 0) {
         endSample = Math.min(Math.floor(trimEndSec * decoded.sampleRate), decoded.length);
       }
-      if (endSample <= startSample) {
-        endSample = decoded.length;
-      }
+      if (endSample <= startSample) throw new Error('Trim range is empty or outside the media duration.');
+      if (trimEndSec === 0) throw new Error('End time must be greater than start time.');
 
       const trimmedLength = endSample - startSample;
       const trimmedAudioBuffer = ctx.createBuffer(
@@ -372,6 +401,7 @@
 
       // Case A: WAV output
       if (targetCodec === 'wav') {
+        if (normalizedOpts.embedMetadata) throw new Error('WAV metadata requires server-side FFmpeg engine.');
         if (onProgress) {
           onProgress({
             status: 'encoding',
@@ -391,11 +421,12 @@
           status: 'encoding',
           percent: 65,
           speed: 'In-Browser MP3',
-          detail: 'Encoding high-definition MP3 on client CPU (0% server load)...',
+          detail: 'Encoding high-definition MP3 on client CPU (browser encoding)...',
         });
       }
 
       const channels = trimmedAudioBuffer.numberOfChannels;
+      if (channels > 2) throw new Error('Multichannel MP3 encoding requires server-side FFmpeg engine.');
       const sampleRate = trimmedAudioBuffer.sampleRate;
       let kbps = 320;
       if (normalizedOpts.audioBitrate) {
@@ -427,6 +458,10 @@
       const mp3Chunks = [];
 
       for (let i = 0; i < numSamples; i += blockSize) {
+        if (i % (blockSize * 20) === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          this.checkCancelled();
+        }
         const leftChunk = left16.subarray(i, i + blockSize);
         const rightChunk = right16.subarray(i, i + blockSize);
         const encodedChunk = mp3Encoder.encodeBuffer(leftChunk, rightChunk);
@@ -454,7 +489,7 @@
       let coverArtBytes = null;
       if (normalizedOpts.embedThumbnail && streamInfo.thumbnail) {
         try {
-          const thumbResp = await fetch(streamInfo.thumbnail);
+          const thumbResp = await fetch(`/api/proxy-stream?url=${encodeURIComponent(streamInfo.thumbnail)}`, { signal: this.abortController?.signal, headers: this.requestHeaders || {} });
           if (thumbResp.ok) {
             const thumbBuf = await thumbResp.arrayBuffer();
             coverArtBytes = new Uint8Array(thumbBuf);
@@ -474,15 +509,16 @@
       }
 
       const id3Header = buildID3v2Tag(
-        {
+        normalizedOpts.embedMetadata ? {
           title: streamInfo.title,
           artist: streamInfo.uploader,
           album: 'StreamFab Client Master',
           year: new Date().getFullYear(),
-        },
+        } : {},
         coverArtBytes
       );
 
+      this.checkCancelled();
       const finalBlob = new Blob([id3Header, ...mp3Chunks], { type: 'audio/mpeg' });
       const finalName = sanitizeName(streamInfo.title, 'mp3');
 
@@ -491,7 +527,7 @@
           status: 'completed',
           percent: 100,
           speed: 'Complete',
-          detail: 'Process complete! 100% computed on your client device (0% server CPU).',
+          detail: 'Process complete! 100% computed on your client device (browser encoding).',
         });
       }
 
@@ -524,6 +560,15 @@
         throw new Error('Multi-track video/audio muxing requires server-side FFmpeg engine.');
       }
 
+      if (streamInfo.combined_ext !== normalizedOpts.videoFormat || normalizedOpts.videoFormat !== 'mp4') {
+        throw new Error('Container conversion requires server-side FFmpeg engine.');
+      }
+      if (streamInfo.video_height && streamInfo.combined_height < streamInfo.video_height) {
+        throw new Error('Requested video quality requires server-side FFmpeg engine.');
+      }
+      if (normalizedOpts.embedMetadata || normalizedOpts.subtitleLang) {
+        throw new Error('Video metadata and subtitles require server-side FFmpeg engine.');
+      }
       const videoBuffer = await this.fetchStreamWithProgress(
         videoUrl,
         'Streaming HD video track',
@@ -549,7 +594,7 @@
           status: 'completed',
           percent: 100,
           speed: 'Complete',
-          detail: 'Video ready! 100% processed on client device (0% server CPU).',
+          detail: 'Video ready! 100% processed on client device (browser encoding).',
         });
       }
 

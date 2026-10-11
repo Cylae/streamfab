@@ -1,22 +1,23 @@
 import os
 import sys
 import time
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+import pytest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from engine import (
-    format_duration,
-    parse_timestamp,
-    classify_engine_error,
-    get_cached_metadata,
-    set_cached_metadata,
-    extract_media_info,
+    _METADATA_CACHE,
     DownloadOptions,
     DownloadTask,
     EngineManager,
-    _METADATA_CACHE,
+    classify_engine_error,
+    extract_media_info,
+    format_duration,
+    get_cached_metadata,
+    parse_timestamp,
+    set_cached_metadata,
 )
 
 
@@ -47,9 +48,11 @@ def test_classify_engine_error():
     assert "403" in classify_engine_error(Exception("HTTP Error 403: Forbidden"))
     assert "404" in classify_engine_error(Exception("HTTP Error 404: Not Found"))
     assert "private" in classify_engine_error(Exception("This is a private video. Sign in to view"))
-    assert "geographical" in classify_engine_error(Exception("Video not available in your country due to geo block"))
+    assert "geographical" in classify_engine_error(
+        Exception("Video not available in your country due to geo block")
+    )
     assert "timed out" in classify_engine_error(Exception("Connection timed out"))
-    assert "Random error" in classify_engine_error(Exception("Random error"))
+    assert "Random error" not in classify_engine_error(Exception("Random error"))
 
 
 def test_metadata_cache():
@@ -64,7 +67,7 @@ def test_metadata_cache():
     assert get_cached_metadata(url) is None
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_extract_media_info_single_video(mock_ydl_class):
     mock_instance = mock_ydl_class.return_value.__enter__.return_value
     mock_instance.extract_info.return_value = {
@@ -75,8 +78,20 @@ def test_extract_media_info_single_video(mock_ydl_class):
         "view_count": 500000,
         "thumbnail": "https://img.youtube.com/vi/vid123/maxresdefault.jpg",
         "formats": [
-            {"format_id": "18", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "url": "https://stream.mp4"},
-            {"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "height": 720, "url": "https://stream720.mp4"},
+            {
+                "format_id": "18",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "height": 360,
+                "url": "https://stream.mp4",
+            },
+            {
+                "format_id": "22",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "height": 720,
+                "url": "https://stream720.mp4",
+            },
             {"format_id": "137", "vcodec": "avc1", "acodec": "none", "height": 1080},
             {"format_id": "140", "vcodec": "none", "acodec": "mp4a"},
         ],
@@ -96,7 +111,7 @@ def test_extract_media_info_single_video(mock_ydl_class):
     assert len(info["subtitles"]) >= 1
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_extract_media_info_playlist(mock_ydl_class):
     mock_instance = mock_ydl_class.return_value.__enter__.return_value
     mock_instance.extract_info.return_value = {
@@ -119,14 +134,14 @@ def test_extract_media_info_playlist(mock_ydl_class):
 
 def test_download_task_lifecycle():
     opts = DownloadOptions(url="https://example.com/test", media_type="audio", audio_format="mp3")
-    task = DownloadTask("task-uuid-123", opts)
+    task = DownloadTask("6cc83701-6028-4f59-ad33-163c5a137edd", opts)
     assert task.progress.status == "queued"
     assert task.to_dict()["status"] == "queued"
 
     # Subscriber test
     queue = task.add_subscriber()
     initial_event = queue.get_nowait()
-    assert initial_event["task_id"] == "task-uuid-123"
+    assert initial_event["task_id"] == "6cc83701-6028-4f59-ad33-163c5a137edd"
 
     # Cancel test
     task.cancel()
@@ -145,7 +160,7 @@ def test_engine_manager():
     assert mgr.get_task("nonexistent") is None
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_execute_download_sync_audio_success(mock_ydl_class):
     mgr = EngineManager()
     opts = DownloadOptions(
@@ -165,7 +180,16 @@ def test_execute_download_sync_audio_success(mock_ydl_class):
         # Trigger progress hooks to verify reporting
         opts_passed = mock_ydl_class.call_args[0][0]
         for hook in opts_passed.get("progress_hooks", []):
-            hook({"status": "downloading", "_percent_str": "50.0%", "_speed_str": "10MiB/s", "_eta_str": "00:05", "downloaded_bytes": 500, "total_bytes": 1000})
+            hook(
+                {
+                    "status": "downloading",
+                    "_percent_str": "50.0%",
+                    "_speed_str": "10MiB/s",
+                    "_eta_str": "00:05",
+                    "downloaded_bytes": 500,
+                    "total_bytes": 1000,
+                }
+            )
             hook({"status": "finished"})
         # Create output file
         dummy_out = task._output_dir / "Super_Song.mp3"
@@ -181,8 +205,9 @@ def test_execute_download_sync_audio_success(mock_ydl_class):
     assert task.progress.file_size == len(b"dummy mp3 data")
 
 
-@patch('engine.yt_dlp.YoutubeDL')
-def test_execute_download_sync_video_and_trim(mock_ydl_class):
+@patch("engine.PublicYoutubeDL")
+@patch("engine.EngineManager._trim_local_file")
+def test_execute_download_sync_video_and_trim(mock_trim, mock_ydl_class):
     mgr = EngineManager()
     opts = DownloadOptions(
         url="https://example.com/video",
@@ -199,8 +224,7 @@ def test_execute_download_sync_video_and_trim(mock_ydl_class):
 
     def fake_download(urls):
         opts_passed = mock_ydl_class.call_args[0][0]
-        assert "download_ranges" in opts_passed
-        assert callable(opts_passed["download_ranges"])
+        assert "download_ranges" not in opts_passed
         assert opts_passed["writesubtitles"] is True
         dummy_out = task._output_dir / "Clipped_Video.mp4"
         dummy_out.write_bytes(b"dummy mp4 data")
@@ -212,7 +236,7 @@ def test_execute_download_sync_video_and_trim(mock_ydl_class):
     assert task.progress.filename == "Clipped_Video.mp4"
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_execute_download_sync_cancellation(mock_ydl_class):
     mgr = EngineManager()
     opts = DownloadOptions(url="https://example.com/video")
@@ -233,7 +257,7 @@ def test_execute_download_sync_cancellation(mock_ydl_class):
         mgr._execute_download_sync(task)
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_execute_download_sync_failure_code(mock_ydl_class):
     mgr = EngineManager()
     opts = DownloadOptions(url="https://example.com/video")
@@ -246,7 +270,7 @@ def test_execute_download_sync_failure_code(mock_ydl_class):
         mgr._execute_download_sync(task)
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_windows_options_in_ydl_opts(mock_ydl_class):
     mgr = EngineManager()
     opts = DownloadOptions(url="https://example.com/video")
@@ -258,7 +282,7 @@ def test_windows_options_in_ydl_opts(mock_ydl_class):
         opts_passed = mock_ydl_class.call_args[0][0]
         assert opts_passed.get("windowsfilenames") is True
         assert opts_passed.get("paths", {}).get("home") == str(task._output_dir)
-        assert "%(title)s.%(ext)s" in str(opts_passed.get("outtmpl"))
+        assert "[%(id)s]" in str(opts_passed.get("outtmpl"))
         dummy_out = task._output_dir / "Video.mp4"
         dummy_out.write_bytes(b"content")
         return 0
@@ -270,6 +294,7 @@ def test_windows_options_in_ydl_opts(mock_ydl_class):
 
 def test_sanitize_filename_windows_illegal_characters():
     from security import sanitize_filename
+
     # Colons, quotes, question marks, pipes, trailing dots and spaces
     bad_name = 'My: Cool "Video"? | Awesome.. '
     cleaned = sanitize_filename(bad_name)
@@ -282,7 +307,8 @@ def test_sanitize_filename_windows_illegal_characters():
 
 
 def test_cleanup_old_tasks():
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
+
     mgr = EngineManager()
     opts = DownloadOptions(url="https://example.com/test")
     task = mgr.create_task(opts)
@@ -291,6 +317,7 @@ def test_cleanup_old_tasks():
     assert task.task_id in mgr.tasks
     assert task._output_dir.exists()
 
+    task.progress.status = "completed"
     mgr.cleanup_old_tasks()
     assert task.task_id not in mgr.tasks
     assert not task._output_dir.exists()
@@ -298,7 +325,7 @@ def test_cleanup_old_tasks():
 
 def test_multiple_subscribers():
     opts = DownloadOptions(url="https://example.com/test")
-    task = DownloadTask("sub-test-id", opts)
+    task = DownloadTask("a2b67097-2a7c-4f2a-a3c5-fde2885f7cb3", opts)
     q1 = task.add_subscriber()
     q2 = task.add_subscriber()
 
@@ -313,7 +340,7 @@ def test_multiple_subscribers():
     assert q2 in task.subscribers
 
 
-@patch('engine.shutil.disk_usage')
+@patch("engine.shutil.disk_usage")
 def test_disk_usage_insufficient_space(mock_disk):
     mock_disk.return_value.free = 50 * 1024 * 1024  # 50 MB
     mgr = EngineManager()
@@ -324,7 +351,7 @@ def test_disk_usage_insufficient_space(mock_disk):
         mgr._execute_download_sync(task)
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_resolve_stream_urls(mock_ydl_class):
     mock_instance = mock_ydl_class.return_value.__enter__.return_value
     mock_instance.extract_info.return_value = {
@@ -333,13 +360,37 @@ def test_resolve_stream_urls(mock_ydl_class):
         "duration": 180,
         "thumbnail": "https://example.com/thumb.png",
         "formats": [
-            {"format_id": "140", "url": "https://cdn.com/audio.m4a", "vcodec": "none", "acodec": "mp4a", "abr": 128, "ext": "m4a"},
-            {"format_id": "137", "url": "https://cdn.com/v1080.mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "ext": "mp4"},
-            {"format_id": "18", "url": "https://cdn.com/v360_combined.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "ext": "mp4"},
-        ]
+            {
+                "format_id": "140",
+                "url": "https://cdn.com/audio.m4a",
+                "vcodec": "none",
+                "acodec": "mp4a",
+                "abr": 128,
+                "ext": "m4a",
+            },
+            {
+                "format_id": "137",
+                "url": "https://cdn.com/v1080.mp4",
+                "vcodec": "avc1",
+                "acodec": "none",
+                "height": 1080,
+                "ext": "mp4",
+            },
+            {
+                "format_id": "18",
+                "url": "https://cdn.com/v360_combined.mp4",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "height": 360,
+                "ext": "mp4",
+            },
+        ],
     }
     from engine import resolve_stream_urls
-    res = resolve_stream_urls("https://example.com/watch", media_type="video", video_quality="1080p")
+
+    res = resolve_stream_urls(
+        "https://example.com/watch", media_type="video", video_quality="1080p"
+    )
     assert res["title"] == "Stream Video"
     assert res["audio_stream_url"] == "https://cdn.com/audio.m4a"
     assert res["video_stream_url"] == "https://cdn.com/v1080.mp4"
@@ -348,8 +399,12 @@ def test_resolve_stream_urls(mock_ydl_class):
 
 
 def test_classify_engine_error_extended():
-    assert "Security check blocked request" in classify_engine_error(Exception("SSRF blocked: local or private IP"))
-    assert "Insufficient disk space" in classify_engine_error(Exception("No disk space left on device"))
+    assert "Security check blocked request" in classify_engine_error(
+        Exception("SSRF blocked: local or private IP")
+    )
+    assert "Insufficient disk space" in classify_engine_error(
+        Exception("No disk space left on device")
+    )
 
 
 def test_metadata_cache_pruning():
@@ -363,7 +418,7 @@ def test_metadata_cache_pruning():
     assert len(_METADATA_CACHE) == 1
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_extract_media_info_cached_hit(mock_ydl):
     mock_instance = mock_ydl.return_value.__enter__.return_value
     mock_instance.extract_info.return_value = {
@@ -382,7 +437,7 @@ def test_extract_media_info_cached_hit(mock_ydl):
     assert mock_instance.extract_info.call_count == 1
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_extract_media_info_4k_and_2k(mock_ydl):
     mock_instance = mock_ydl.return_value.__enter__.return_value
     mock_instance.extract_info.return_value = {
@@ -390,9 +445,26 @@ def test_extract_media_info_4k_and_2k(mock_ydl):
         "title": "4K Video",
         "duration": 120,
         "formats": [
-            {"format_id": "313", "vcodec": "vp9", "acodec": "none", "height": 2160, "url": "https://cdn/4k.webm"},
-            {"format_id": "271", "vcodec": "vp9", "acodec": "none", "height": 1440, "url": "https://cdn/2k.webm"},
-            {"format_id": "140", "vcodec": "none", "acodec": "mp4a", "url": "https://cdn/audio.m4a"},
+            {
+                "format_id": "313",
+                "vcodec": "vp9",
+                "acodec": "none",
+                "height": 2160,
+                "url": "https://cdn/4k.webm",
+            },
+            {
+                "format_id": "271",
+                "vcodec": "vp9",
+                "acodec": "none",
+                "height": 1440,
+                "url": "https://cdn/2k.webm",
+            },
+            {
+                "format_id": "140",
+                "vcodec": "none",
+                "acodec": "mp4a",
+                "url": "https://cdn/audio.m4a",
+            },
         ],
     }
     info = extract_media_info("https://example.com/4k_test")
@@ -401,7 +473,7 @@ def test_extract_media_info_4k_and_2k(mock_ydl):
     assert "1440p" in res_values
 
 
-@patch('engine.shutil.disk_usage')
+@patch("engine.shutil.disk_usage")
 def test_execute_download_sync_trim_end_less_than_start(mock_disk):
     mock_disk.return_value.free = 10 * 1024 * 1024 * 1024
     mgr = EngineManager()
@@ -415,7 +487,7 @@ def test_execute_download_sync_trim_end_less_than_start(mock_disk):
         mgr._execute_download_sync(task)
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_resolve_stream_urls_fallback_and_qualities(mock_ydl):
     mock_instance = mock_ydl.return_value.__enter__.return_value
     mock_instance.extract_info.return_value = {
@@ -424,12 +496,34 @@ def test_resolve_stream_urls_fallback_and_qualities(mock_ydl):
         "duration": 50,
         "formats": [
             # Combined format with audio, no audio-only format
-            {"format_id": "18", "url": "https://cdn/combined360.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "ext": "mp4"},
-            {"format_id": "22", "url": "https://cdn/combined720.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 720, "ext": "mp4"},
-            {"format_id": "313", "url": "https://cdn/v4k.mp4", "vcodec": "vp9", "acodec": "none", "height": 2160, "ext": "mp4"},
+            {
+                "format_id": "18",
+                "url": "https://cdn/combined360.mp4",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "height": 360,
+                "ext": "mp4",
+            },
+            {
+                "format_id": "22",
+                "url": "https://cdn/combined720.mp4",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "height": 720,
+                "ext": "mp4",
+            },
+            {
+                "format_id": "313",
+                "url": "https://cdn/v4k.mp4",
+                "vcodec": "vp9",
+                "acodec": "none",
+                "height": 2160,
+                "ext": "mp4",
+            },
         ],
     }
     from engine import resolve_stream_urls
+
     res = resolve_stream_urls("https://example.com/qualities", video_quality="720p")
     assert res["audio_stream_url"] == "https://cdn/combined720.mp4"
     assert res["video_stream_url"] == "https://cdn/combined720.mp4"
@@ -439,9 +533,10 @@ def test_resolve_stream_urls_fallback_and_qualities(mock_ydl):
     assert res_4k["video_stream_url"] == "https://cdn/v4k.mp4"
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_execute_download_sync_playlist_multiple_files_zipped(mock_ydl_class):
     import zipfile
+
     mgr = EngineManager()
     opts = DownloadOptions(
         url="https://example.com/playlist",
@@ -468,7 +563,7 @@ def test_execute_download_sync_playlist_multiple_files_zipped(mock_ydl_class):
         assert "track2.mp3" in names
 
 
-@patch('engine.yt_dlp.YoutubeDL')
+@patch("engine.PublicYoutubeDL")
 def test_execute_download_sync_wav_skips_embed_thumbnail(mock_ydl_class):
     mgr = EngineManager()
     opts = DownloadOptions(
@@ -491,7 +586,3 @@ def test_execute_download_sync_wav_skips_embed_thumbnail(mock_ydl_class):
     mock_instance.download.side_effect = fake_download
     mgr._execute_download_sync(task)
     assert task.progress.status == "completed"
-
-
-
-

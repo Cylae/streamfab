@@ -1481,7 +1481,7 @@ details[open] .faq-question::after {
 }
 
 /* ==========================================================================
-   YouTube Anti-Bot Challenge Guidance Card ("Pris par la main")
+   YouTube Anti-Bot Challenge Guidance Card
    ========================================================================== */
 .bot-guidance-card {
   max-width: 880px;
@@ -2066,4 +2066,15 @@ details[open] .faq-question::after {
   .guidance-steps-grid { grid-template-columns: 1fr; }
   .guidance-actions { flex-direction: column; width: 100%; }
   .btn-guidance-primary, .btn-guidance-retry { width: 100%; }
+}
+
+/* Keep external metadata legible without injecting markup. */
+.playlist-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-item-dur { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem; }
+.cookie-status-banner { flex-wrap: wrap; }
+#cookieAdminToken { width: 100%; }
+[data-theme="light"] { --text-muted: #64748b; }
+:focus-visible { outline: 2px solid var(--accent-pink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }

@@ -15,3 +15,11 @@ tests/
 .agent/
 .system_generated/
 *.log
+
+cookies.txt
+cookies*.txt
+node_modules/
+coverage.json
+htmlcov/
+.ruff_cache/
+.github/

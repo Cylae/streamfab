@@ -1,283 +1,112 @@
-# StreamFab &mdash; Modern Media Downloader &amp; Converter (NoTube Alternative)
+# StreamFab
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com/)
-[![yt--dlp](https://img.shields.io/badge/yt--dlp-2024%2B-red.svg)](https://github.com/yt-dlp/yt-dlp)
-[![Tests](https://img.shields.io/badge/Tests-125%20passed-brightgreen.svg)]()
-[![Coverage](https://img.shields.io/badge/Coverage-93%25-brightgreen.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
+A Python CLI and self-hosted web interface for downloading and converting media with yt-dlp and FFmpeg. The interface supports light/dark themes, media analysis, audio/video format selection, trimming, playlists, subtitles, and SSE progress.
 
-> A high-performance, ad-free, privacy-friendly video & audio converter and downloader. Designed to completely outclass legacy web converters like **NoTube** with client-side in-browser computing (0% server CPU load), turbo multi-fragment downloads, lossless audio (FLAC/MP3 320k), 4K 60fps video, interactive trimming, playlist batching, and real-time SSE progress tracking. Available both as a modern Web App and a versatile CLI.
+This is a **single-user application**. Place remote deployments behind authentication and HTTPS. It does not implement separate user accounts or isolated credentials for multiple tenants.
 
----
+## Quick start
 
-## ⚡ StreamFab vs NoTube Comparison
-
-| Evaluation Metric | NoTube & Legacy Converters | StreamFab PRO (Our Engine) |
-|---|---|---|
-| **Server CPU Load** | 🚨 100% CPU bottleneck (converts on server) | ⚡ **0% Server CPU (In-Browser Client Compute)** |
-| **Ads & Popups** | 🚨 Intrusive, deceptive redirects, malware risks | 🛡️ **0 Ads, 0 Trackers, 100% Clean** |
-| **Max Video Resolution** | 🔒 Often capped at 720p or compressed 1080p | 💎 **True 4K 60fps & 2K QHD Lossless** |
-| **Audio Quality** | ⚠️ Standard compressed MP3 (128-192 kbps) | 🎧 **MP3 320 kbps HD, Lossless FLAC, Studio WAV** |
-| **Built-in Trimmer (Trim & Cut)** | ❌ Missing (forces full video download) | ✂️ **Precise down-to-the-second trimming** |
-| **Playlists & Batch Downloads** | ❌ 1-by-1 manual or paywalled | 📋 **Full playlists with individual video selection** |
-| **Processing Speed** | 🐢 Overcrowded, slow server queues | ⚡ **Client GPU/AudioContext Hardware Acceleration** |
-| **In-App Media Player** | ❌ No preview available before conversion | 🎬 **Built-in audio/video player in the Web App** |
-| **Subtitles & Metadata** | ❌ Not supported | 📝 **Multi-language subtitles & ID3 tags + HD cover art** |
-
----
-
-## 🌐 In-Browser Client Compute (Zero Server CPU Load)
-
-Unlike NoTube and legacy converters where thousands of users cause heavy server CPU spikes from video transcoding and audio encoding, StreamFab offloads **100% of compute-heavy tasks directly to the client's browser**:
-
-- **Web Audio API**: Hardware-accelerated in-browser audio decoding into Float32 PCM sample buffers.
-- **Sample-Accurate Trimming**: Sub-millisecond slice precision directly in browser memory without FFmpeg container overhead.
-- **In-Browser MP3 Encoder (`lamejs`)**: Multi-bitrate encoding (128k to 320k) performed entirely by client threads.
-- **Pure JavaScript ID3v2.3 Tagger**: Injects ID3 metadata and embedded high-resolution JPEG cover art in browser memory.
-- **Zero-Copy Streaming Proxy (`/api/proxy-stream`)**: Asynchronous, zero-copy byte stream pass-through with HTTP Range support (`206 Partial Content`) that prevents browser CORS issues while maintaining 0% server CPU utilization and 0 bytes server disk usage.
-
----
-
-## 🚀 Quick Start
-
-### 1. Requirements
-
-- Python 3.10 or higher
-- `ffmpeg` installed and available in PATH (Ubuntu: `sudo apt install ffmpeg`, macOS: `brew install ffmpeg`, Windows: `winget install Gyan.FFmpeg` or official binary)
-
-### 2. Installation
+Requirements: Python 3.10+, FFmpeg/ffprobe on PATH. Node.js 24+ is needed only for JavaScript tests.
 
 ```bash
 git clone https://github.com/Cylae/streamfab.git
 cd streamfab
-pip install -r requirements.txt
+python -m venv .venv
+# Linux/macOS:
+. .venv/bin/activate
+# Windows PowerShell instead:
+# .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.lock
+python src/downloader.py --web --open-browser
 ```
 
-### 3. Launch the Web Interface (NoTube Alternative)
+Open `http://127.0.0.1:8000`. On Windows, `StreamFab.bat` creates a virtual environment, installs the locked dependencies, and opens the interface after the server starts.
+
+## Processing modes
+
+| Capability | Browser mode | Server mode |
+|---|---|---|
+| Audio formats | MP3 and WAV, subject to browser decoding support | MP3, M4A, FLAC, WAV, Opus |
+| Video | Existing combined MP4 with matching quality; no remuxing | MP4, MKV, WebM with compatible source codecs |
+| Trimming | Audio samples | Downloads the media, then trims locally using FFmpeg |
+| Metadata | ID3v2.3 Unicode tags and JPEG/PNG cover art for MP3 | FFmpeg metadata and supported cover art |
+| Playlists/subtitles | Routes to server mode | Up to 250 selected entries; manual or automatic subtitles |
+| Resources | Browser CPU/RAM plus server extraction and bandwidth | Server CPU, RAM, disk and bandwidth |
+
+Unsupported browser operations fall back to the server. Browser stream buffering is limited to 128 MiB; decoded audio can consume considerably more memory. Selecting a high bitrate or converting compressed audio to FLAC does not restore information missing from the source. Maximum resolution and site compatibility depend on the original media and yt-dlp.
+
+The web engine allows only public HTTP/HTTPS destinations on ports 80/443. It checks redirects and resolved addresses at connection time. External network downloaders, FTP and RTSP are disabled in web mode. This may exclude some streams that the locally operated CLI supports. HTTP proxy environment variables are deliberately ignored by web media transports.
+
+## CLI
 
 ```bash
-# Launch on http://127.0.0.1:8000
-python src/downloader.py --web
-
-# Or with custom port and auto-opening browser:
-python src/downloader.py --web --port 8080 --open-browser
-
-# On Windows (Desktop 1-click launcher):
-StreamFab.bat
-```
-
-Then open your browser at **http://127.0.0.1:8000/**.
-
----
-
-## 💻 CLI Usage
-
-StreamFab can also be operated as a powerful command-line tool with zero configuration:
-
-```bash
-python src/downloader.py [options] [URL]
-```
-
-### CLI Examples
-
-**Download a video in Best Quality (up to 4K):**
-```bash
+python src/downloader.py --help
 python src/downloader.py "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Extract Ultra HD Audio (MP3 320kbps):**
-```bash
-python src/downloader.py --extract-audio "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download only a specific clip (Trimming):**
-```bash
-python src/downloader.py --trim-start "00:01:30" --trim-end "00:02:45" "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download with embedded subtitles and metadata:**
-```bash
-python src/downloader.py --subtitles --embed-metadata --embed-thumbnail "https://www.youtube.com/watch?v=BaW_jenozKc"
-```
-
-**Download batch URLs from a file:**
-```bash
+python src/downloader.py --extract-audio --embed-metadata "https://www.youtube.com/watch?v=BaW_jenozKc"
+python src/downloader.py -f mp4 -q 1080p --no-playlist "https://www.youtube.com/watch?v=BaW_jenozKc"
+python src/downloader.py --trim-start 00:01:30 --trim-end 00:02:45 "https://www.youtube.com/watch?v=BaW_jenozKc"
 python src/downloader.py -a urls.txt
+python src/downloader.py --cookies /path/to/cookies.txt "https://www.youtube.com/watch?v=BaW_jenozKc"
 ```
 
-### Complete CLI Options
+CLI MP3 output uses 192 kbps by default; the web interface defaults to 320 kbps. Batch files are UTF-8, one URL per line; blank lines and `#` comments are ignored. CLI trimming uses yt-dlp download ranges and may use FFmpeg network downloading; run the CLI only with URLs you trust.
 
-| Argument | Description | Default |
+## Cookies and credentials
+
+Session cookies grant access to an account. Upload them only to an instance you control. Netscape cookie syntax is validated before atomic replacement; files use private permissions on POSIX systems. The application creates a separate temporary cookie jar for each extraction/download and never serves the cookie contents through the API.
+
+Cookie administration is restricted to loopback clients unless `STREAMFAB_ADMIN_TOKEN` is configured. When configured, use `Authorization: Bearer <token>` even locally. The Cookie Assistant has a token input; the token stays in memory. If a cookie file is installed, remote media analysis/download/proxy requests also require that authorization, so anonymous callers cannot borrow the owner's session. File/progress/cancel URLs use an unguessable task UUID as a capability; keep these URLs private.
+
+## Configuration
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `url` | URL of the media or playlist to download | None |
-| `-a`, `--batch-file` | File containing multiple URLs (one per line) | None |
-| `-f`, `--format` | Output container format (`mp4`, `mkv`, `best`) | `best` |
-| `-q`, `--quality` | Video quality target (`best`, `1080p`, `720p`, `480p`, `worst`) | `best` |
-| `--extract-audio` | Extract audio only and convert to MP3 | False |
-| `--trim-start` | Start timestamp for trimming (e.g. `00:01:30`) | None |
-| `--trim-end` | End timestamp for trimming (e.g. `00:02:45`) | None |
-| `--subtitles` | Download and embed available subtitles | False |
-| `--no-playlist` | Download single video if part of playlist | False |
-| `--embed-metadata` | Embed ID3 tags, title, artist, uploader | False |
-| `--embed-thumbnail` | Embed high-resolution cover art | False |
-| `--list-formats` | List all available stream formats without downloading | False |
-| `--max-retries` | Number of retries on transient network errors | 3 |
-| `--cookies` | Path to Netscape `cookies.txt` file for authentication & bot challenge bypass | Auto (`cookies.txt`) |
-| `--web` | Launch the modern StreamFab Web App | False |
-| `--port` | Port for the web server | 8000 |
-| `--host` | Host address for the web server | 127.0.0.1 |
-| `--open-browser` | Open web browser automatically | False |
+| `STREAMFAB_HOST` | `127.0.0.1` | CLI web bind address |
+| `STREAMFAB_PORT` | `8000` | Web port |
+| `STREAMFAB_STORAGE_DIR` | OS temp directory + `/streamfab_downloads` | Isolated task outputs |
+| `STREAMFAB_DOWNLOADS_DIR` | unset | Storage fallback alias |
+| `STREAMFAB_COOKIES_FILE` | Project `cookies.txt` fallback | Cookie storage path |
+| `STREAMFAB_ADMIN_TOKEN` | unset | Cookie/session administration token |
+| `STREAMFAB_TRUSTED_HOSTS` | `localhost,127.0.0.1,[::1]` | Comma-separated accepted HTTP hostnames |
+| `STREAMFAB_LOG_LEVEL` | `info` | Uvicorn logging level |
 
----
+Limits: 3 concurrent downloads, 4 metadata extractions, 16 proxy streams, 100 retained tasks, 100 metadata cache entries, and 3 MiB request bodies. Download progress enforces a 2 GiB task disk budget and checks free disk space. These checks are not filesystem quotas; conversion and temporary files can exceed the budget between checks. Use container and filesystem resource limits for remote deployments. Completed/error/cancelled tasks expire after one hour; active workers are retained. Outputs survive process restart only when an atomic completion record exists. Periodic cleanup runs every minute while the server is running.
 
-## 🌐 REST & SSE API Reference
+Run **one Uvicorn worker**. Task state and rate limits are in memory and are not shared between processes.
 
-StreamFab includes an asynchronous FastAPI backend:
+## API
 
-| Endpoint | Method | Description |
+| Method | Route | Purpose |
 |---|---|---|
-| `/` | `GET` | Serves the responsive SPA web frontend |
-| `/api/health` | `GET` | Health check endpoint returning service status |
-| `/api/info` | `POST` | Instant media analysis (title, uploader, thumbnail, formats, subtitles, playlist items) |
-| `/api/stream-urls` | `POST` | Resolves direct CDN stream URLs for zero-server-CPU client-side processing |
-| `/api/proxy-stream` | `GET` | Zero-CPU asynchronous stream pass-through with Range support for browser clients |
-| `/api/cookies` | `GET` | Get status of installed YouTube cookies (`has_cookies`, count, timestamps) |
-| `/api/cookies` | `POST` | Upload or paste Netscape format `cookies.txt` with auto-validation |
-| `/api/cookies` | `DELETE` | Remove installed cookies file |
-| `/api/download` | `POST` | Dispatches background conversion task with turbo multi-fragment engine |
-| `/api/progress/{task_id}` | `GET` | Server-Sent Events (SSE) streaming real-time progress (% %, speed, ETA, status) |
-| `/api/file/{task_id}` | `GET` | Downloads the converted file with resume support and safe path validation |
-| `/api/cancel/{task_id}` | `POST` | Cancels an ongoing task cleanly |
+| GET | `/api/health` | Health and active task count |
+| POST | `/api/info` | Metadata and format analysis |
+| POST | `/api/stream-urls` | Browser stream resolution |
+| GET | `/api/proxy-stream?url=...` | Checked raw media passthrough; single byte-range support |
+| POST | `/api/download` | Create task |
+| GET | `/api/progress/{task_id}` | SSE progress |
+| GET | `/api/file/{task_id}` | Completed file delivery |
+| POST | `/api/cancel/{task_id}` | Cooperative cancellation |
+| GET/POST/DELETE | `/api/cookies` | Authorized cookie status/upload/removal |
 
-### API Example: Start Conversion
+Cancellation interrupts progress hooks and local trimming. A blocking extractor or yt-dlp postprocessor may finish its current operation before cancellation takes effect. Cross-origin API calls are rejected; the frontend is served by the same instance.
 
-```bash
-curl -X POST "http://127.0.0.1:8000/api/download" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://www.youtube.com/watch?v=BaW_jenozKc",
-    "media_type": "audio",
-    "audio_format": "mp3",
-    "audio_quality": "320k",
-    "trim_start": "00:00:30",
-    "trim_end": "00:01:30"
-  }'
-```
-
-Response:
-```json
-{
-  "success": true,
-  "task_id": "7f8b9d3e-4b6a-4d92-91ea-0d7281f62b11",
-  "status": "downloading"
-}
-```
-
----
-
-## 🚀 Production Deployment
-
-StreamFab is production-ready for single-instance VPS, Docker clusters, and cloud container platforms. For comprehensive step-by-step instructions, see the complete [Deployment Guide (DEPLOYMENT.md)](DEPLOYMENT.md).
-
-### Quick Deployment via Docker Compose
+## Development and verification
 
 ```bash
-# 1. Clone repository
-git clone https://github.com/Cylae/streamfab.git
-cd streamfab
-
-# 2. Start container in background
-docker compose up -d --build
-
-# 3. Check health status
-curl -i http://localhost:8000/api/health
+python -m pip install -r requirements-dev.txt
+python -m ruff check src tests
+python -m ruff format --check src tests
+python -m pytest --cov=src --cov-report=term-missing
+npm ci
+npm test
+python -m pip_audit -r requirements.lock
+npm audit
 ```
 
-### Production Linux VPS (Systemd + Nginx)
+Tests isolate storage, cookies, DNS and background downloads. They include guarded transport integration with a synthetic HTTP server, real FFmpeg audio/video fixtures where FFmpeg is available, and DOM regressions for unsafe metadata and cancellation. Tests do not claim every live platform works. See [AUDIT.md](AUDIT.md) for findings, validation evidence and limitations; see [DEPLOYMENT.md](DEPLOYMENT.md) for installation on a server.
 
-1. **Systemd Service**: Deploy the pre-configured [streamfab.service](deployment/streamfab.service) into `/etc/systemd/system/`.
-2. **Reverse Proxy**: Use the battle-tested [nginx.conf](deployment/nginx.conf) with unbuffered SSE and byte-range streaming proxy configurations.
-3. **SSL/TLS**: Enable automated HTTPS with Let's Encrypt Certbot (`certbot --nginx -d yourdomain.com`).
+Dependencies are pinned. The public-network transport adapter uses internal yt-dlp/httpcore APIs: rerun transport tests before updating them. To refresh the complete runtime lock in a clean virtual environment, install reviewed direct requirements, run `python -m pip freeze > requirements.lock`, audit the result, and rerun the suite. Do not schedule unattended dependency upgrades.
 
-Detailed deployment instructions for **Docker**, **Ubuntu/Debian Systemd**, **Nginx/Caddy**, **Railway**, **Render**, **Fly.io**, **AWS EC2**, and **DigitalOcean** are available in [DEPLOYMENT.md](DEPLOYMENT.md).
+## Third-party software
 
----
-
-## 🍪 1-Click Cookie Assistant (Bypassing YouTube Anti-Bot Challenges)
-
-YouTube periodically triggers automated verification challenges (`Sign in to confirm you’re not a bot`) on server networks, cloud providers, and high-frequency queries.
-
-StreamFab provides an interactive **Cookie Assistant** built directly into the Web UI:
-
-1. **Automatic Detection**: When a YouTube challenge occurs, StreamFab replaces confusing error screens with an informative, step-by-step guidance card taking you by the hand.
-2. **1-Click Extension Export**:
-   - Install the trusted, open-source browser extension [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) (Chrome / Brave / Edge) or [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/) (Firefox).
-   - Open YouTube in your browser, click the extension icon, and click **Export**.
-3. **Drop or Paste & Auto-Retry**:
-   - Drag & drop the downloaded `cookies.txt` into StreamFab (or paste the text).
-   - StreamFab validates the file, saves it securely on your local instance, and **automatically re-triggers video analysis** with zero extra clicks.
-4. **CLI Support**:
-   - You can also pass cookies directly from the terminal:
-     ```bash
-     python src/downloader.py --cookies path/to/cookies.txt "https://www.youtube.com/watch?v=..."
-     ```
-
----
-
-## 🧪 Testing
-
-Execute the comprehensive Python test suite (125 tests, 93% statement coverage) with `pytest`:
-
-```bash
-pytest
-```
-
-Run test suite with detailed coverage report:
-
-```bash
-pytest --cov=src --cov-report=term-missing
-```
-
-Execute the in-browser JavaScript Client Media Engine test suite:
-
-```bash
-node tests/test_client_processor.js
-```
-
-The test suite covers:
-- **CLI Suite**: Argument parsing, defaults, batch files, format listing, retry heuristics, exponential backoff.
-- **Engine Suite**: Metadata extraction, caching with TTL, duration formatting, timestamp validation, 4K/2K resolutions, segment trimming, audio/video stream resolution.
-- **Web API Suite**: Endpoints (`/api/health`, `/api/info`, `/api/download`, `/api/file`, `/api/progress`, `/api/stream-urls`, `/api/proxy-stream`), SSE event generation, HTTP Range requests.
-- **Security Suite**: Anti-SSRF protection, private/reserved IP blocking, cloud metadata defense, filename sanitization, rate limiting, and HTTP security headers.
-- **Client Processor Suite**: Pure JavaScript ID3v2.3 tagging with APIC cover art, 16-bit PCM WAV encoding, in-browser MP3 encoding via `lamejs`, and precision sample trimming.
-
----
-
-## 🏛️ Architecture & Design Decisions (ADRs)
-
-1. **ADR-001: Server-Sent Events (SSE) over WebSockets**
-   - *Context:* Need real-time progress streaming for progress bars, download speed, and ETA.
-   - *Decision:* Use SSE (`text/event-stream` via FastAPI `StreamingResponse`) instead of WebSockets.
-   - *Reason:* SSE is native in all modern browsers (`EventSource`), firewall and proxy-friendly, auto-reconnecting, HTTP/2 multiplexed, and requires no external WebSocket state or handshakes.
-
-2. **ADR-002: In-Memory Metadata Caching with TTL**
-   - *Context:* Users frequently toggle between audio and video or adjust trimming timestamps for the same URL.
-   - *Decision:* Implement bounded in-memory caching with a 5-minute TTL.
-   - *Reason:* Eliminates redundant network queries to YouTube/TikTok APIs, providing instantaneous format updates and trimming changes.
-
-3. **ADR-003: UUID-Isolated Task Storage & Path Traversal Immunity**
-   - *Context:* Web applications downloading files to disk must be immune to directory traversal.
-   - *Decision:* Every task is strictly keyed by a standard UUIDv4 and isolated in `DOWNLOADS_DIR / <uuid>`.
-   - *Reason:* User input can never control storage directories or file paths. `/api/file/{task_id}` enforces `is_relative_to(expected_dir)`.
-
-4. **ADR-004: Dual-Engine Architecture (CLI & Web Share Same Core)**
-   - *Context:* Both the command-line interface and the web interface need high-performance downloading and conversion.
-   - *Decision:* Centralize download logic, options building, and error diagnosis in `engine.py`, leaving `downloader.py` and `web_server.py` as clean client adapters.
-   - *Reason:* Zero duplicated logic, unified error classification, and 100% backward compatibility with existing workflows.
-
----
-
-## ⚖️ Legal Disclaimer
-
-This software is intended solely for downloading publicly available, non-DRM protected content for personal, archival, or educational use. It does not circumvent Digital Rights Management (DRM) or technical protection measures. Users are responsible for complying with the Terms of Service of content platforms and local copyright regulations.
+Browser MP3 encoding uses [lamejs](https://github.com/zhuker/lamejs) and [LAME](https://lame.sourceforge.io/), subject to their LGPL terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). yt-dlp, FFmpeg and Python dependencies retain their own licenses. This repository previously advertised an MIT license without including a project license file; that badge has been removed rather than assuming licensing authority.

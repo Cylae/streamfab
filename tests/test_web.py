@@ -3,15 +3,15 @@ import sys
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
+
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
+from engine import DOWNLOADS_DIR, DownloadOptions, DownloadTask, engine
 from web_server import app
-from engine import DownloadOptions, DownloadTask, engine, DOWNLOADS_DIR
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
 
 
 def test_health_endpoint():
@@ -29,7 +29,7 @@ def test_root_index():
     assert "StreamFab" in response.text
 
 
-@patch('web_server.extract_media_info')
+@patch("web_server.extract_media_info")
 def test_info_endpoint_success(mock_extract):
     mock_extract.return_value = {
         "id": "123",
@@ -55,7 +55,7 @@ def test_info_endpoint_empty_url():
     assert response.status_code == 422
 
 
-@patch('engine.EngineManager.run_task')
+@patch("engine.EngineManager.run_task")
 def test_download_endpoint_success(mock_run):
     payload = {
         "url": "https://youtube.com/watch?v=123",
@@ -203,7 +203,7 @@ def test_static_index_html_english():
     assert "Download &amp; Convert" in html or "Download & Convert" in html
     assert "Features" in html
     assert "Built-in Audio/Video Trimmer" in html
-    assert "Why StreamFab Outclasses NoTube" in html
+    assert "Choose How Your Media Is Processed" in html
     # Ensure no French strings in UI
     assert "Téléchargez" not in html
     assert "Découpeur Audio/Vidéo" not in html
@@ -326,7 +326,8 @@ def test_proxy_stream_mock_success(mock_send):
     async def fake_iter(chunk_size=65536):
         yield b"audio_chunk_data"
 
-    mock_upstream.aiter_bytes = fake_iter
+    mock_upstream.aiter_raw = fake_iter
+    mock_upstream.is_redirect = False
     mock_upstream.aclose = AsyncMock()
     mock_send.return_value = mock_upstream
 
@@ -353,7 +354,8 @@ def test_download_validation_trim_end_less_than_start():
     assert "End time must be greater than start time" in response.text
 
 
-def test_short_url_formats_validation():
+@patch("web_server.extract_media_info", return_value={})
+def test_short_url_formats_validation(mock_extract):
     # Allow youtu.be short form without explicit https://
     res = client.post("/api/info", json={"url": "youtu.be/dQw4w9WgXcQ"})
     # It passes url validator (might fail extraction, but validator won't reject with 422)
@@ -424,6 +426,3 @@ def test_cookies_upload_oversized():
     res = client.post("/api/cookies", json={"content": oversized})
     assert res.status_code == 400
     assert "limit" in res.json()["detail"].lower()
-
-
-
