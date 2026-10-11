@@ -44,6 +44,10 @@ BANNED_HOST_KEYWORDS: Tuple[str, ...] = (
 )
 
 
+# Banned ports for SSRF protection
+BANNED_PORTS: Set[int] = {21, 22, 23, 25, 53, 110, 143, 6379, 11211, 27017, 9200}
+
+
 class SSRFValidationError(ValueError):
     """Raised when a URL targets a forbidden destination."""
     pass
@@ -96,6 +100,10 @@ def validate_and_sanitize_url(url: str) -> str:
     if parsed.username or parsed.password:
         raise SSRFValidationError("Credentials in URL are not allowed.")
 
+    # Check port against dangerous service ports
+    if parsed.port and parsed.port in BANNED_PORTS:
+        raise SSRFValidationError(f"Access to port {parsed.port} is blocked for security reasons.")
+
     # Check banned keywords
     for banned in BANNED_HOST_KEYWORDS:
         if hostname == banned or hostname.endswith("." + banned):
@@ -104,6 +112,30 @@ def validate_and_sanitize_url(url: str) -> str:
     # Check common cloud metadata endpoints
     if hostname == "169.254.169.254" or hostname == "metadata.google.internal":
         raise SSRFValidationError("Attempt to access cloud metadata blocked.")
+
+    # Check numeric or hex IP notation (e.g. 2130706433, 0x7f000001)
+    try:
+        if hostname.isdigit() or (
+            hostname.startswith(("0x", "0X"))
+            and all(c in "0123456789abcdefABCDEF" for c in hostname[2:])
+        ):
+            num = int(hostname, 0)
+            if 0 <= num <= 0xFFFFFFFF:
+                raw_ip = ipaddress.IPv4Address(num)
+                if is_ip_private_or_reserved(str(raw_ip)):
+                    raise SSRFValidationError(
+                        f"Access denied: '{hostname}' targets a local or private IP address ({raw_ip})."
+                    )
+        else:
+            raw_ip = ipaddress.ip_address(hostname.strip("[]"))
+            if is_ip_private_or_reserved(str(raw_ip)):
+                raise SSRFValidationError(
+                    f"Access denied: '{hostname}' is a local or private IP address ({raw_ip})."
+                )
+    except SSRFValidationError:
+        raise
+    except (ValueError, OverflowError):
+        pass
 
     # Resolve domain to check target IP addresses
     try:
@@ -194,15 +226,29 @@ class RateLimiter:
         now = time.time()
         cutoff = now - self.window_seconds
 
-        # Clean old timestamps
+        # Clean old timestamps for this client
         history = [t for t in self.requests[client_ip] if t > cutoff]
-        self.requests[client_ip] = history
+        if history:
+            self.requests[client_ip] = history
+        else:
+            self.requests.pop(client_ip, None)
+            history = []
+
+        # Periodic memory prune if tracking large number of distinct IPs
+        if len(self.requests) > 1000:
+            stale_ips = [ip for ip, timestamps in self.requests.items() if not any(t > cutoff for t in timestamps)]
+            for ip in stale_ips:
+                self.requests.pop(ip, None)
 
         if len(history) >= self.max_requests:
             return False
 
         self.requests[client_ip].append(now)
         return True
+
+    def reset(self) -> None:
+        """Reset all tracked rate limits."""
+        self.requests.clear()
 
 
 # Global rate limiters
@@ -214,8 +260,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Enforces strict HTTP Security Headers on all responses."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # IP Extraction
+        # IP Extraction with reverse proxy support (e.g. Nginx, Docker)
         client_ip = request.client.host if request.client else "127.0.0.1"
+        if client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith(("172.", "10.")):
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                client_ip = forwarded.split(",")[0].strip()
+            elif "x-real-ip" in request.headers:
+                client_ip = request.headers["x-real-ip"].strip()
 
         # Apply Rate Limiting on API endpoints
         path = request.url.path

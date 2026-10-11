@@ -1,4 +1,6 @@
 import argparse
+import os
+from pathlib import Path
 import sys
 import time
 import webbrowser
@@ -165,14 +167,14 @@ def get_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="Web server host address (default: 127.0.0.1)."
+        default=os.getenv("STREAMFAB_HOST", "127.0.0.1"),
+        help="Web server host address (default: 127.0.0.1 or $STREAMFAB_HOST)."
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="Web server port (default: 8000)."
+        default=int(os.getenv("STREAMFAB_PORT", "8000")),
+        help="Web server port (default: 8000 or $STREAMFAB_PORT)."
     )
     parser.add_argument(
         "--open-browser",
@@ -344,11 +346,15 @@ def list_formats(urls: List[str], ydl_opts: Dict[str, Any]) -> bool:
 def run_web_server(host: str = "127.0.0.1", port: int = 8000, open_browser: bool = False) -> None:
     """Launch the FastAPI web server with Uvicorn."""
     import uvicorn
+    src_dir = Path(__file__).resolve().parent
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    log_level = os.getenv("STREAMFAB_LOG_LEVEL", "info").lower()
     console.print(f"[bold green]🚀 StreamFab Web UI running at:[/bold green] [bold cyan]http://{host}:{port}[/bold cyan]")
     console.print("[dim]Press Ctrl+C to stop the server.[/dim]")
     if open_browser:
         webbrowser.open(f"http://{host}:{port}")
-    uvicorn.run("web_server:app", host=host, port=port, log_level="info")
+    uvicorn.run("web_server:app", host=host, port=port, log_level=log_level, app_dir=str(src_dir))
 
 
 def main() -> None:

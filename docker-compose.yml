@@ -11,6 +11,7 @@ services:
     environment:
       - STREAMFAB_HOST=0.0.0.0
       - STREAMFAB_PORT=8000
+      - STREAMFAB_STORAGE_DIR=/app/downloads
     volumes:
       - streamfab_downloads:/app/downloads
     healthcheck:

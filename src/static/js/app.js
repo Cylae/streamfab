@@ -19,6 +19,7 @@
         activeTaskId: null,
         eventSource: null,
         useClientCompute: true,
+        isProcessing: false,
       };
 
       this.dom = {};
@@ -560,7 +561,9 @@
 
     /* ---------------- Start Conversion & SSE Tracking ---------------- */
     async startDownload() {
+      if (this.state.isProcessing) return;
       if (!this.state.currentMedia) return;
+      this.state.isProcessing = true;
 
       const payload = {
         url: this.state.currentMedia.url,
@@ -620,6 +623,7 @@
           this.dom.downloadReadyActions.classList.remove('hidden');
           this.dom.metricStatus.textContent = 'Completed (Client)';
           this.dom.metricStatus.className = 'metric-value status-pill status-completed';
+          this.state.isProcessing = false;
           return;
         } catch (clientErr) {
           console.warn('Client-side processing fallback to server:', clientErr);
@@ -643,6 +647,7 @@
         this.state.activeTaskId = data.task_id;
         this.listenToProgress(data.task_id);
       } catch (err) {
+        this.state.isProcessing = false;
         this.showError(err.message || 'Error while starting conversion.');
         this.dom.progressSection.classList.add('hidden');
         this.dom.inspectorSection.classList.remove('hidden');
@@ -693,6 +698,7 @@
     }
 
     handleCompleted(data) {
+      this.state.isProcessing = false;
       this.dom.progressBarFill.style.width = '100%';
       this.dom.progressPercentBadge.textContent = '100%';
       this.dom.progressDetail.textContent = 'Your file is ready for download!';
@@ -710,6 +716,7 @@
     }
 
     handleError(msg) {
+      this.state.isProcessing = false;
       this.showError(`Failed: ${msg}`);
       this.dom.progressDetail.textContent = `Error: ${msg}`;
       this.dom.metricStatus.textContent = 'Error';
@@ -895,6 +902,7 @@
       if (this.state.eventSource) {
         this.state.eventSource.close();
       }
+      this.state.isProcessing = false;
       this.state.activeTaskId = null;
       this.state.currentMedia = null;
       this.dom.progressSection.classList.add('hidden');
@@ -915,7 +923,15 @@
   }
 
   // Instantiate and mount globally for HTML event handlers
-  document.addEventListener('DOMContentLoaded', () => {
-    window.app = new StreamFabApp();
-  });
+  function initApp() {
+    if (!window.app) {
+      window.app = new StreamFabApp();
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+  } else {
+    initApp();
+  }
 })();

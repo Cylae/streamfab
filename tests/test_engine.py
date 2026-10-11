@@ -426,12 +426,72 @@ def test_resolve_stream_urls_fallback_and_qualities(mock_ydl):
             # Combined format with audio, no audio-only format
             {"format_id": "18", "url": "https://cdn/combined360.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "ext": "mp4"},
             {"format_id": "22", "url": "https://cdn/combined720.mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 720, "ext": "mp4"},
+            {"format_id": "313", "url": "https://cdn/v4k.mp4", "vcodec": "vp9", "acodec": "none", "height": 2160, "ext": "mp4"},
         ],
     }
     from engine import resolve_stream_urls
     res = resolve_stream_urls("https://example.com/qualities", video_quality="720p")
     assert res["audio_stream_url"] == "https://cdn/combined720.mp4"
     assert res["video_stream_url"] == "https://cdn/combined720.mp4"
+
+    res_4k = resolve_stream_urls("https://example.com/qualities", video_quality="4k")
+    assert res_4k["video_height"] == 2160
+    assert res_4k["video_stream_url"] == "https://cdn/v4k.mp4"
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_execute_download_sync_playlist_multiple_files_zipped(mock_ydl_class):
+    import zipfile
+    mgr = EngineManager()
+    opts = DownloadOptions(
+        url="https://example.com/playlist",
+        playlist_indices=[1, 2],
+    )
+    task = mgr.create_task(opts)
+    mock_instance = mock_ydl_class.return_value.__enter__.return_value
+
+    def fake_download(urls):
+        f1 = task._output_dir / "track1.mp3"
+        f1.write_bytes(b"track 1 mp3")
+        f2 = task._output_dir / "track2.mp3"
+        f2.write_bytes(b"track 2 mp3")
+        return 0
+
+    mock_instance.download.side_effect = fake_download
+    mgr._execute_download_sync(task)
+    assert task.progress.status == "completed"
+    assert task.progress.filename == "StreamFab_Playlist.zip"
+    assert task.progress.file_path.endswith(".zip")
+    with zipfile.ZipFile(task.progress.file_path, "r") as zf:
+        names = zf.namelist()
+        assert "track1.mp3" in names
+        assert "track2.mp3" in names
+
+
+@patch('engine.yt_dlp.YoutubeDL')
+def test_execute_download_sync_wav_skips_embed_thumbnail(mock_ydl_class):
+    mgr = EngineManager()
+    opts = DownloadOptions(
+        url="https://example.com/audio",
+        media_type="audio",
+        audio_format="wav",
+        embed_thumbnail=True,
+    )
+    task = mgr.create_task(opts)
+    mock_instance = mock_ydl_class.return_value.__enter__.return_value
+
+    def fake_download(urls):
+        opts_passed = mock_ydl_class.call_args[0][0]
+        pp_keys = [p.get("key") for p in opts_passed.get("postprocessors", [])]
+        assert "EmbedThumbnail" not in pp_keys
+        out_f = task._output_dir / "audio.wav"
+        out_f.write_bytes(b"wav bytes")
+        return 0
+
+    mock_instance.download.side_effect = fake_download
+    mgr._execute_download_sync(task)
+    assert task.progress.status == "completed"
+
 
 
 

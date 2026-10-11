@@ -22,9 +22,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from engine import (
-    DownloadOptions,
-    DownloadTask,
     DOWNLOADS_DIR,
+    DownloadOptions,
     delete_cookies_file,
     engine,
     extract_media_info,
@@ -37,6 +36,7 @@ from security import (
     SecurityHeadersMiddleware,
     sanitize_filename,
     validate_and_sanitize_url,
+    validate_timestamp_strict,
 )
 
 app = FastAPI(
@@ -101,6 +101,17 @@ class DownloadRequest(BaseModel):
             return "https://" + s
         return s
 
+    @field_validator("trim_start", "trim_end")
+    @classmethod
+    def validate_timestamp_format(cls, v: Optional[str]) -> Optional[str]:
+        if not v or not str(v).strip():
+            return None
+        try:
+            validate_timestamp_strict(v)
+        except Exception as e:
+            raise ValueError(f"Invalid timestamp format: {e}")
+        return v.strip()
+
     @field_validator("trim_end")
     @classmethod
     def validate_trim(cls, v: Optional[str], info) -> Optional[str]:
@@ -148,6 +159,14 @@ class StreamUrlsRequest(BaseModel):
     video_format: str = Field(default="mp4")
     video_quality: str = Field(default="best")
 
+    @field_validator("url")
+    @classmethod
+    def clean_url(cls, v: str) -> str:
+        s = v.strip()
+        if not s.startswith(("http://", "https://")):
+            return "https://" + s
+        return s
+
 
 @app.post("/api/stream-urls")
 async def get_stream_urls(req: StreamUrlsRequest) -> Dict[str, Any]:
@@ -182,7 +201,7 @@ async def get_stream_urls(req: StreamUrlsRequest) -> Dict[str, Any]:
 async def proxy_stream(url: str, request: Request) -> StreamingResponse:
     """Zero-CPU asynchronous stream pass-through with Range support for browser clients."""
     try:
-        safe_url = validate_and_sanitize_url(url)
+        current_url = validate_and_sanitize_url(url)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid stream URL: {exc}")
 
@@ -193,11 +212,30 @@ async def proxy_stream(url: str, request: Request) -> StreamingResponse:
     if range_header:
         req_headers["Range"] = range_header
 
-    client = httpx.AsyncClient(timeout=60.0, follow_redirects=True)
+    # Do not auto-follow redirects blindly to prevent SSRF bypass via 302 redirects
+    client = httpx.AsyncClient(timeout=60.0, follow_redirects=False)
+    upstream_resp = None
     try:
-        upstream_req = client.build_request("GET", safe_url, headers=req_headers)
-        upstream_resp = await client.send(upstream_req, stream=True)
+        for _ in range(5):
+            upstream_req = client.build_request("GET", current_url, headers=req_headers)
+            resp = await client.send(upstream_req, stream=True)
+            if resp.is_redirect and "location" in resp.headers:
+                raw_loc = resp.headers["location"]
+                await resp.aclose()
+                next_url = urllib.parse.urljoin(current_url, raw_loc)
+                current_url = validate_and_sanitize_url(next_url)
+                continue
+            upstream_resp = resp
+            break
+
+        if upstream_resp is None:
+            raise HTTPException(status_code=502, detail="Too many redirects from upstream stream.")
+    except HTTPException:
+        await client.aclose()
+        raise
     except Exception as exc:
+        if upstream_resp:
+            await upstream_resp.aclose()
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"Upstream stream error: {exc}")
 
@@ -336,6 +374,7 @@ async def download_file(task_id: str) -> FileResponse:
         ".mp4": "video/mp4",
         ".mkv": "video/x-matroska",
         ".webm": "video/webm",
+        ".zip": "application/zip",
     }
     content_type = media_types.get(ext, "application/octet-stream")
 

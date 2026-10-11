@@ -28,8 +28,14 @@ from security import (
     validate_timestamp_strict,
 )
 
+import zipfile
+
 # Output directory for processed files
-DOWNLOADS_DIR = Path(os.getenv("STREAMFAB_STORAGE_DIR", tempfile.gettempdir())) / "streamfab_downloads"
+storage_env = os.getenv("STREAMFAB_STORAGE_DIR") or os.getenv("STREAMFAB_DOWNLOADS_DIR")
+if storage_env:
+    DOWNLOADS_DIR = Path(storage_env).resolve()
+else:
+    DOWNLOADS_DIR = Path(tempfile.gettempdir()) / "streamfab_downloads"
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # In-memory metadata cache (URL -> (timestamp, info_dict))
@@ -134,15 +140,25 @@ def save_cookies_text(content: str) -> Dict[str, Any]:
 
 
 def delete_cookies_file() -> bool:
-    """Delete the saved cookies.txt file if it exists."""
-    cookie_path = get_cookiefile_opt()
-    if cookie_path and os.path.isfile(cookie_path):
-        try:
-            os.remove(cookie_path)
-            return True
-        except Exception:
-            return False
-    return False
+    """Delete saved cookies files if they exist."""
+    deleted_any = False
+    candidates = [
+        COOKIES_FILE_PATH,
+        Path.cwd() / "cookies.txt",
+        Path(__file__).resolve().parent / "cookies.txt",
+    ]
+    custom_cookie = os.getenv("STREAMFAB_COOKIES_FILE")
+    if custom_cookie:
+        candidates.append(Path(custom_cookie))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                candidate.unlink(missing_ok=True)
+                deleted_any = True
+            except Exception:
+                pass
+    return deleted_any
 
 
 def classify_engine_error(exc: Exception) -> str:
@@ -270,6 +286,13 @@ def extract_media_info(url: str, fast_mode: bool = True) -> Dict[str, Any]:
                 continue
             entry_thumbs = entry.get("thumbnails") or []
             entry_thumb = entry.get("thumbnail") or (entry_thumbs[-1]["url"] if entry_thumbs else result["thumbnail"])
+            entry_url = entry.get("webpage_url") or entry.get("url")
+            if not entry_url or not str(entry_url).startswith(("http://", "https://")):
+                entry_id = entry.get("id")
+                if entry_id and re.match(r"^[a-zA-Z0-9_-]{8,15}$", str(entry_id)):
+                    entry_url = f"https://www.youtube.com/watch?v={entry_id}"
+                else:
+                    entry_url = f"{safe_url}#{idx+1}"
             entries.append({
                 "index": idx + 1,
                 "id": entry.get("id"),
@@ -278,7 +301,7 @@ def extract_media_info(url: str, fast_mode: bool = True) -> Dict[str, Any]:
                 "duration": entry.get("duration"),
                 "duration_formatted": format_duration(entry.get("duration")),
                 "thumbnail": entry_thumb,
-                "url": entry.get("url") or entry.get("webpage_url") or f"{safe_url}#{idx+1}",
+                "url": entry_url,
             })
         result["playlist_entries"] = entries
         result["playlist_count"] = len(entries)
@@ -454,6 +477,17 @@ class EngineManager:
                 except Exception:
                     pass
 
+        # Also purge orphaned task directories on disk from previous runs
+        if DOWNLOADS_DIR.exists():
+            for folder in DOWNLOADS_DIR.iterdir():
+                if folder.is_dir() and folder.name not in self.tasks:
+                    try:
+                        mtime = folder.stat().st_mtime
+                        if (time.time() - mtime) > TASK_RETENTION_SECONDS:
+                            shutil.rmtree(folder, ignore_errors=True)
+                    except Exception:
+                        pass
+
     def create_task(self, options: DownloadOptions) -> DownloadTask:
         self.cleanup_old_tasks()
         task_id = str(uuid.uuid4())
@@ -481,10 +515,10 @@ class EngineManager:
         opts = task.options
         out_dir = task._output_dir
 
-        # Check available disk space (at least 200MB free) using drive root for Windows safety
+        # Check available disk space (at least 200MB free) using target dir if exists or drive root
         try:
-            drive_or_dir = Path(out_dir).anchor or out_dir
-            free_space = shutil.disk_usage(drive_or_dir).free
+            target_dir = out_dir if out_dir.exists() else (Path(out_dir).anchor or out_dir)
+            free_space = shutil.disk_usage(target_dir).free
             if free_space < 200 * 1024 * 1024:
                 raise RuntimeError("Insufficient disk space on the server.")
         except Exception as e:
@@ -530,6 +564,7 @@ class EngineManager:
             end_val = trim_end_sec if trim_end_sec is not None else float("inf")
             ydl_opts["download_ranges"] = download_range_func(None, [(start_val, end_val)])
 
+        target_codec = "mp3"
         # Audio conversion
         if opts.media_type == "audio":
             ydl_opts["format"] = "bestaudio/best"
@@ -570,7 +605,8 @@ class EngineManager:
         # Metadata embedding
         if opts.embed_metadata:
             ydl_opts.setdefault("postprocessors", []).append({"key": "FFmpegMetadata"})
-        if opts.embed_thumbnail and opts.media_type == "audio":
+        # WAV format does not support embedding cover art via EmbedThumbnail
+        if opts.embed_thumbnail and opts.media_type == "audio" and target_codec != "wav":
             ydl_opts["writethumbnail"] = True
             ydl_opts.setdefault("postprocessors", []).extend([
                 {"key": "FFmpegThumbnailsConvertor", "format": "jpg"},
@@ -637,7 +673,22 @@ class EngineManager:
         if not generated_files:
             raise FileNotFoundError("No converted file was found.")
 
-        target_file = max(generated_files, key=lambda f: f.stat().st_size)
+        # Filter media files vs auxiliary files (like stray thumbnail images)
+        media_extensions = {".mp3", ".m4a", ".flac", ".wav", ".opus", ".mp4", ".mkv", ".webm"}
+        media_files = [f for f in generated_files if f.suffix.lower() in media_extensions]
+        files_to_serve = media_files if media_files else generated_files
+
+        # If multiple media files were downloaded (e.g. playlist batch), bundle into a zip
+        if len(files_to_serve) > 1:
+            zip_name = "StreamFab_Playlist.zip"
+            zip_path = out_dir / zip_name
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for f in files_to_serve:
+                    zf.write(f, arcname=f.name)
+            target_file = zip_path
+        else:
+            target_file = files_to_serve[0]
+
         safe_name = sanitize_filename(target_file.name)
         task.progress.status = "completed"
         task.progress.percent = 100.0
@@ -700,9 +751,9 @@ def resolve_stream_urls(
 
     # 2. Video streams
     target_height = 1080
-    if video_quality == "2160p":
+    if video_quality in ("2160p", "4k"):
         target_height = 2160
-    elif video_quality == "1440p":
+    elif video_quality in ("1440p", "2k"):
         target_height = 1440
     elif video_quality == "1080p":
         target_height = 1080
@@ -714,6 +765,8 @@ def resolve_stream_urls(
         target_height = 360
     elif video_quality == "worst":
         target_height = 144
+    elif video_quality == "best":
+        target_height = 4320
 
     best_video = None
     combined_stream = None

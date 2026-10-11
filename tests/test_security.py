@@ -163,3 +163,36 @@ class TestRateLimiter:
         # After window expires, requests should be allowed again
         time.sleep(1.1)
         assert limiter.is_allowed(ip) is True
+
+    def test_rate_limiter_reset(self):
+        limiter = RateLimiter(max_requests=1, window_seconds=60)
+        assert limiter.is_allowed("192.0.2.1") is True
+        assert limiter.is_allowed("192.0.2.1") is False
+        limiter.reset()
+        assert limiter.is_allowed("192.0.2.1") is True
+
+    def test_rate_limiter_cleanup_empty_history(self):
+        limiter = RateLimiter(max_requests=5, window_seconds=1)
+        ip = "192.0.2.2"
+        limiter.is_allowed(ip)
+        assert ip in limiter.requests
+        time.sleep(1.1)
+        # Next call prunes and re-adds
+        limiter.is_allowed(ip)
+        assert len(limiter.requests[ip]) == 1
+
+
+class TestAdvancedSSRFProtections:
+    def test_numeric_and_hex_loopback_blocked(self):
+        # Decimal 2130706433 is 127.0.0.1
+        with pytest.raises(SSRFValidationError, match="local or private IP"):
+            validate_and_sanitize_url("http://2130706433/secret")
+
+        # Hex 0x7f000001 is 127.0.0.1
+        with pytest.raises(SSRFValidationError, match="local or private IP"):
+            validate_and_sanitize_url("http://0x7f000001/secret")
+
+    def test_banned_service_ports_blocked(self):
+        for port in [21, 22, 23, 25, 53, 6379, 11211, 27017]:
+            with pytest.raises(SSRFValidationError, match="blocked for security"):
+                validate_and_sanitize_url(f"http://example.com:{port}/media")

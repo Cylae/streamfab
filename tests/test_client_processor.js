@@ -168,8 +168,65 @@ async function runAudioTest() {
   console.log(`  ✓ Output MP3 size: ${result.blob.size} bytes (100% computed in browser, 0% server CPU).\n`);
 }
 
-runAudioTest().then(() => {
-  console.log('=====================================================');
-  console.log('🎉 ALL CLIENT-SIDE PROCESSOR TESTS PASSED (100%)');
-  console.log('=====================================================');
-});
+async function runFallbackTests() {
+  // Test 6: Option normalization supports snake_case
+  console.log('✓ Test 6: Option normalization');
+  const normalized = engine._normalizeOptions({
+    media_type: 'AUDIO',
+    audio_format: 'MP3',
+    audio_quality: '192k',
+    trim_start: '00:10',
+    trim_end: '00:45',
+    embed_thumbnail: false,
+  });
+  assert.strictEqual(normalized.mediaType, 'audio');
+  assert.strictEqual(normalized.audioCodec, 'mp3');
+  assert.strictEqual(normalized.audioBitrate, '192k');
+  assert.strictEqual(normalized.trimStart, '00:10');
+  assert.strictEqual(normalized.trimEnd, '00:45');
+  assert.strictEqual(normalized.embedThumbnail, false);
+
+  // Test 7: Unsupported audio codec triggers error for server fallback
+  console.log('✓ Test 7: Unsupported codec triggers error for server fallback');
+  let threwCodec = false;
+  try {
+    await engine.processAudio({ audio_proxy_url: '/dummy' }, { audioCodec: 'flac' }, null, null);
+  } catch (err) {
+    threwCodec = true;
+    assert(err.message.includes("requires server-side FFmpeg"));
+  }
+  assert(threwCodec, 'Expected flac to throw for server-side fallback');
+
+  // Test 8: Video trimming or missing combined stream triggers server fallback
+  console.log('✓ Test 8: Video trimming and missing combined track trigger fallback');
+  let threwTrim = false;
+  try {
+    await engine.processVideo({ combined_proxy_url: '/dummy' }, { trimStart: '00:10' }, 10, null);
+  } catch (err) {
+    threwTrim = true;
+    assert(err.message.includes('Video trimming requires server-side FFmpeg'));
+  }
+  assert(threwTrim, 'Expected video trimming to throw for server-side fallback');
+
+  let threwNoCombined = false;
+  try {
+    await engine.processVideo({ video_proxy_url: '/video_only' }, {}, null, null);
+  } catch (err) {
+    threwNoCombined = true;
+    assert(err.message.includes('Multi-track video/audio muxing requires server-side FFmpeg'));
+  }
+  assert(threwNoCombined, 'Expected video without combined stream to throw for server fallback');
+}
+
+runAudioTest()
+  .then(() => runFallbackTests())
+  .then(() => {
+    console.log('=====================================================');
+    console.log('🎉 ALL CLIENT-SIDE PROCESSOR TESTS PASSED (100%)');
+    console.log('=====================================================');
+  })
+  .catch((err) => {
+    console.error('❌ Test failed:', err);
+    process.exit(1);
+  });
+

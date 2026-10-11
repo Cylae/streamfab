@@ -183,6 +183,23 @@
       this.audioContext = null;
     }
 
+    _normalizeOptions(opts) {
+      const o = opts || {};
+      return {
+        url: o.url,
+        mediaType: (o.mediaType || o.media_type || 'audio').toLowerCase(),
+        audioCodec: (o.audioCodec || o.audio_format || 'mp3').toLowerCase(),
+        audioBitrate: String(o.audioBitrate || o.audio_quality || '320k'),
+        videoFormat: (o.videoFormat || o.video_format || 'mp4').toLowerCase(),
+        videoQuality: String(o.videoQuality || o.video_quality || 'best'),
+        trimStart: o.trimStart !== undefined ? o.trimStart : (o.trim_start !== undefined ? o.trim_start : null),
+        trimEnd: o.trimEnd !== undefined ? o.trimEnd : (o.trim_end !== undefined ? o.trim_end : null),
+        embedMetadata: o.embedMetadata !== undefined ? o.embedMetadata : (o.embed_metadata !== undefined ? o.embed_metadata : true),
+        embedThumbnail: o.embedThumbnail !== undefined ? o.embedThumbnail : (o.embed_thumbnail !== undefined ? o.embed_thumbnail : true),
+        subtitleLang: o.subtitleLang || o.subtitle_lang || null,
+      };
+    }
+
     getAudioContext() {
       if (!this.audioContext) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -232,7 +249,9 @@
       return totalBuf.buffer;
     }
 
-    async process(options, onProgress) {
+    async process(rawOptions, onProgress) {
+      const options = this._normalizeOptions(rawOptions);
+
       // 1. Resolve direct stream URLs (Zero server CPU)
       if (onProgress) {
         onProgress({
@@ -248,11 +267,11 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: options.url,
-          media_type: options.mediaType || 'audio',
-          audio_format: options.audioCodec || 'mp3',
-          audio_quality: options.audioBitrate || '320k',
-          video_quality: options.videoQuality || '1080p',
-          video_format: options.videoFormat || 'mp4',
+          media_type: options.mediaType,
+          audio_format: options.audioCodec,
+          audio_quality: options.audioBitrate,
+          video_quality: options.videoQuality,
+          video_format: options.videoFormat,
         }),
       });
 
@@ -273,17 +292,23 @@
     }
 
     async processAudio(streamInfo, options, trimStartSec, trimEndSec, onProgress) {
+      const normalizedOpts = this._normalizeOptions(options);
       if (typeof trimStartSec === 'function') {
         onProgress = trimStartSec;
-        trimStartSec = parseTimestampToSeconds(options.trimStart);
-        trimEndSec = parseTimestampToSeconds(options.trimEnd);
+        trimStartSec = parseTimestampToSeconds(normalizedOpts.trimStart);
+        trimEndSec = parseTimestampToSeconds(normalizedOpts.trimEnd);
       } else {
         if (trimStartSec === undefined || trimStartSec === null) {
-          trimStartSec = parseTimestampToSeconds(options.trimStart);
+          trimStartSec = parseTimestampToSeconds(normalizedOpts.trimStart);
         }
         if (trimEndSec === undefined || trimEndSec === null) {
-          trimEndSec = parseTimestampToSeconds(options.trimEnd);
+          trimEndSec = parseTimestampToSeconds(normalizedOpts.trimEnd);
         }
+      }
+
+      const targetCodec = (normalizedOpts.audioCodec || 'mp3').toLowerCase();
+      if (targetCodec !== 'mp3' && targetCodec !== 'wav') {
+        throw new Error(`In-browser encoding for '${targetCodec}' requires server-side FFmpeg engine.`);
       }
 
       const audioUrl = streamInfo.audio_proxy_url || streamInfo.combined_proxy_url;
@@ -311,6 +336,11 @@
       }
 
       const ctx = this.getAudioContext();
+      if (ctx.state === 'suspended') {
+        try {
+          await ctx.resume();
+        } catch (e) {}
+      }
       // decodeAudioData consumes the ArrayBuffer so slice a copy
       const decoded = await ctx.decodeAudioData(audioBuffer.slice(0));
 
@@ -340,8 +370,6 @@
         destData.set(srcData.subarray(startSample, endSample));
       }
 
-      const targetCodec = (options.audioCodec || 'mp3').toLowerCase();
-
       // Case A: WAV output
       if (targetCodec === 'wav') {
         if (onProgress) {
@@ -370,8 +398,8 @@
       const channels = trimmedAudioBuffer.numberOfChannels;
       const sampleRate = trimmedAudioBuffer.sampleRate;
       let kbps = 320;
-      if (options.audioBitrate) {
-        const parsedBitrate = parseInt(options.audioBitrate.replace('k', ''), 10);
+      if (normalizedOpts.audioBitrate) {
+        const parsedBitrate = parseInt(normalizedOpts.audioBitrate.replace('k', ''), 10);
         if ([128, 192, 256, 320].includes(parsedBitrate)) kbps = parsedBitrate;
       }
 
@@ -424,7 +452,7 @@
 
       // Download Cover Art for ID3v2 tagging if requested
       let coverArtBytes = null;
-      if (options.embedThumbnail && streamInfo.thumbnail) {
+      if (normalizedOpts.embedThumbnail && streamInfo.thumbnail) {
         try {
           const thumbResp = await fetch(streamInfo.thumbnail);
           if (thumbResp.ok) {
@@ -471,23 +499,29 @@
     }
 
     async processVideo(streamInfo, options, trimStartSec, trimEndSec, onProgress) {
+      const normalizedOpts = this._normalizeOptions(options);
       if (typeof trimStartSec === 'function') {
         onProgress = trimStartSec;
-        trimStartSec = parseTimestampToSeconds(options.trimStart);
-        trimEndSec = parseTimestampToSeconds(options.trimEnd);
+        trimStartSec = parseTimestampToSeconds(normalizedOpts.trimStart);
+        trimEndSec = parseTimestampToSeconds(normalizedOpts.trimEnd);
       } else {
         if (trimStartSec === undefined || trimStartSec === null) {
-          trimStartSec = parseTimestampToSeconds(options.trimStart);
+          trimStartSec = parseTimestampToSeconds(normalizedOpts.trimStart);
         }
         if (trimEndSec === undefined || trimEndSec === null) {
-          trimEndSec = parseTimestampToSeconds(options.trimEnd);
+          trimEndSec = parseTimestampToSeconds(normalizedOpts.trimEnd);
         }
       }
 
-      // If a combined stream is available and no trim requested, stream directly
-      const videoUrl = streamInfo.combined_proxy_url || streamInfo.video_proxy_url;
+      // Video trimming requires server-side FFmpeg engine
+      if (trimStartSec !== null || trimEndSec !== null) {
+        throw new Error('Video trimming requires server-side FFmpeg engine.');
+      }
+
+      // Combined audio/video stream check
+      const videoUrl = streamInfo.combined_proxy_url;
       if (!videoUrl) {
-        throw new Error('No video stream URL available for this resolution.');
+        throw new Error('Multi-track video/audio muxing requires server-side FFmpeg engine.');
       }
 
       const videoBuffer = await this.fetchStreamWithProgress(

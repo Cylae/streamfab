@@ -8,7 +8,8 @@ FROM python:3.12-slim-bookworm AS base
 # Prevent Python from writing .pyc files and enable unbuffered logging
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    STREAMFAB_STORAGE_DIR=/app/downloads
 
 # Install system dependencies: FFmpeg, curl (for healthcheck), ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
